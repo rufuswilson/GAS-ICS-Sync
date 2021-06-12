@@ -2,7 +2,7 @@
 *=========================================
 *       INSTALLATION INSTRUCTIONS
 *=========================================
-* 
+*
 * 1) Make a copy:
 *      New Interface: Go to the project overview icon on the left (looks like this: ⓘ), then click the "copy" icon on the top right (looks like two files on top of each other)
 *      Old Interface: Click in the menu "File" > "Make a copy..." and make a copy to your Google Drive
@@ -26,7 +26,7 @@ var sourceCalendars = [                // The ics/ical urls that you want to get
   ["icsUrl1", "targetCalendar1"],
   ["icsUrl2", "targetCalendar2"],
   ["icsUrl3", "targetCalendar1"]
-  
+
 ];
 
 var howFrequent = 15;                  // What interval (minutes) to run this script on to check for new events
@@ -101,7 +101,7 @@ function install(){
   //Schedule sync routine to explicitly repeat and schedule the initial sync
   ScriptApp.newTrigger("startSync").timeBased().everyMinutes(getValidTriggerFrequency(howFrequent)).create();
   ScriptApp.newTrigger("startSync").timeBased().after(1000).create();
-  
+
   //Schedule sync routine to look for update once per day
   ScriptApp.newTrigger("checkForUpdate").timeBased().everyDays(1).create();
 }
@@ -115,9 +115,10 @@ var startUpdateTime;
 // Per-calendar global variables (must be reset before processing each new calendar!)
 var calendarEvents = [];
 var calendarEventsIds = [];
-var icsEventsIds = [];
 var calendarEventsMD5s = [];
-var recurringEvents = [];
+var icsEventsIds = [];
+var iCalUIDTracker = {};
+var recurringEventExceptions = [];
 var targetCalendarId;
 var targetCalendarName;
 
@@ -131,23 +132,23 @@ function startSync(){
     Logger.log("Another iteration is currently running! Exiting...");
     return;
   }
-  
+
   PropertiesService.getUserProperties().setProperty('LastRun', new Date().getTime());
   
   if (onlyFutureEvents)
-    startUpdateTime = new ICAL.Time.fromJSDate(new Date());
+    startUpdateTime = new ICAL.Time.fromJSDate(nowDate);
   
-  //Disable email notification if no mail adress is provided 
+  //Disable email notification if no mail adress is provided
   emailSummary = emailSummary && email != "";
   
-  sourceCalendars = condenseCalendarMap(sourceCalendars);
-  for (var calendar of sourceCalendars){
+  for (var calendar of condenseCalendarMap(sourceCalendars)){
     //------------------------ Reset globals ------------------------
     calendarEvents = [];
     calendarEventsIds = [];
-    icsEventsIds = [];
     calendarEventsMD5s = [];
-    recurringEvents = [];
+    icsEventsIds = [];
+    iCalUIDTracker = {};
+    recurringEventExceptions = [];
 
     targetCalendarName = calendar[0];
     var sourceCalendarURLs = calendar[1];
@@ -164,41 +165,29 @@ function startSync(){
     
     //------------------------ Parse existing events --------------------------
     if(addEventsToCalendar || modifyExistingEvents || removeEventsFromCalendar){
-      var eventList =
-        callWithBackoff(function(){
-            return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500});
-        }, defaultMaxRetries);
-      calendarEvents = [].concat(calendarEvents, eventList.items);
-      //loop until we received all events
-      while(typeof eventList.nextPageToken !== 'undefined'){
-        eventList = callWithBackoff(function(){
-          return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500, pageToken: eventList.nextPageToken});
-        }, defaultMaxRetries);
-
-        if (eventList != null)
-          calendarEvents = [].concat(calendarEvents, eventList.items);
-      }
+      var eventListCondition = {maxResults: 2500, showDeleted: false, showHiddenInvitations: false, singleEvents: false};
+      eventListCondition.privateExtendedProperty = "fromGAS=true";
+      calendarEvents = GetAllEvents(targetCalendarId,eventListCondition);
       Logger.log("Fetched " + calendarEvents.length + " existing events from " + targetCalendarName);
       for (var i = 0; i < calendarEvents.length; i++){
-        if (calendarEvents[i].extendedProperties != null){
+        if (calendarEvents[i].hasOwnProperty("extendedProperties")) {
           calendarEventsIds[i] = calendarEvents[i].extendedProperties.private["rec-id"] || calendarEvents[i].extendedProperties.private["id"];
           calendarEventsMD5s[i] = calendarEvents[i].extendedProperties.private["MD5"];
         }
       }
 
-      //------------------------ Parse ical events --------------------------
+      //------------------------ Process responses ------------------------
       vevents = parseResponses(responses, icsEventsIds);
-      Logger.log("Parsed " + vevents.length + " events from ical sources");
+      Logger.log("Parsed " + vevents.length + " events from sources");
     }
     
-    //------------------------ Process ical events ------------------------
+    //------------------------ Process events ------------------------
     if (addEventsToCalendar || modifyExistingEvents){
       Logger.log("Processing " + vevents.length + " events");
-      var calendarTz =
-        callWithBackoff(function(){
-          return Calendar.Settings.get("timezone").value;
-        }, defaultMaxRetries);
-      
+      var calendarTz = callWithBackoff(function(){
+            return Calendar.Settings.get("timezone").value;
+          }, defaultMaxRetries);
+
       vevents.forEach(function(e){
         processEvent(e, calendarTz);
       });
@@ -218,11 +207,9 @@ function startSync(){
       processTasks(responses);
     }
 
-    //------------------------ Add Recurring Event Instances ------------------------
-    Logger.log("Processing " + recurringEvents.length + " Recurrence Instances!");
-    for (var recEvent of recurringEvents){
-      processEventInstance(recEvent);
-    }
+    //------------------------ Add Recurring Event Exceptions ------------------------
+    Logger.log("Processing " + recurringEventExceptions.length + " Recurring Event Exceptions!");
+    processEventExceptions();
   }
 
   if ((addedEvents.length + modifiedEvents.length + removedEvents.length) > 0 && emailSummary){
