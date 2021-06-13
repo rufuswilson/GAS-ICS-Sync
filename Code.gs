@@ -116,7 +116,6 @@ var startUpdateTime;
 var calendarEvents = [];
 var calendarEventsIds = [];
 var calendarEventsMD5s = [];
-var icsEventsIds = [];
 var iCalUIDTracker = {};
 var recurringEventExceptions = [];
 var targetCalendarId;
@@ -146,7 +145,6 @@ function startSync(){
     calendarEvents = [];
     calendarEventsIds = [];
     calendarEventsMD5s = [];
-    icsEventsIds = [];
     iCalUIDTracker = {};
     recurringEventExceptions = [];
 
@@ -177,7 +175,7 @@ function startSync(){
       }
 
       //------------------------ Process responses ------------------------
-      vevents = parseResponses(responses, icsEventsIds);
+      vevents = parseResponses(responses);
       Logger.log("Parsed " + vevents.length + " events from sources");
     }
     

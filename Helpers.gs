@@ -881,7 +881,7 @@ function processEventExceptions(){
 
       if (eventInstanceToPatch.length == 0){
         if (onlyFutureEvents && isOldException) {
-          Logger.log("    > No Instance matched, ignoring old event!");
+          Logger.log("    > Ignoring old missing event exception!");
         }else{
           Logger.log("    > No Instance matched, adding as new event!");
           if (addEventsToCalendar){
