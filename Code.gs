@@ -117,6 +117,7 @@ var calendarEvents = [];
 var calendarEventsIds = [];
 var calendarEventsMD5s = [];
 var iCalUIDTracker = {};
+var icsEventsIds = [];
 var recurringEventExceptions = [];
 var targetCalendarId;
 var targetCalendarName;
@@ -146,6 +147,7 @@ function startSync(){
     calendarEventsIds = [];
     calendarEventsMD5s = [];
     iCalUIDTracker = {};
+    icsEventsIds = [];
     recurringEventExceptions = [];
 
     targetCalendarName = calendar[0];
