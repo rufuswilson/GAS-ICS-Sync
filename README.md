@@ -1,6 +1,6 @@
 # GAS-ICS-Sync
 
-### ⚠️⚠️ This project is looking for contributors and people to help answer questions! Please message @developers on the Discord! ⚠️⚠️
+This repository remains a fork of [derekantrican/GAS-ICS-Sync](https://github.com/derekantrican/GAS-ICS-Sync). The [`stable` branch](https://github.com/rufuswilson/GAS-ICS-Sync/tree/stable) is the GitHub default and contains this fork's calendar sync changes. Upstream changes are incorporated into `stable` when chosen; the fork relationship does not update that branch automatically.
 
 This is a standalone script (that consists of multiple files). The purpose is to sync ics/ical calendars to Google Calendar. Google Calendar *can* already do this, but updates only happen once every 12 or even 24 hrs. This script can be run much more frequently.
 
@@ -43,13 +43,13 @@ ICS feeds are decoded as UTF-8 and require valid HTTPS certificates. VFREEBUSY-o
 var autoUpdateRepository = "rufuswilson/GAS-ICS-Sync";
 var autoUpdateMode = "auto";          // "auto" installs; "email" only notifies
 var autoUpdateChannel = "release";    // "release" or "bleeding-edge"
-var autoUpdateBranch = "master";      // branch used for bleeding-edge
+var autoUpdateBranch = "stable";      // branch used for bleeding-edge
 var email = "you@example.com";       // required for email mode
 ```
 
-Release mode follows the latest published GitHub release. Bleeding edge follows the latest commit on the selected branch. Both fetch code at one fixed tag or commit. `Config.gs` and `Filters.gs` in your Apps Script project are retained. Run `PreviewUpdate()` from the editor to preview the selected version and managed files without installing or sending email. `AutoUpdate()` checks and acts on the configured mode; running `install()` recreates the daily update trigger. An existing `checkForUpdate` trigger replaces itself with an `AutoUpdate` trigger on its next run.
+Release mode follows the latest published GitHub release. Bleeding edge follows the latest commit on the selected branch. Set `autoUpdateBranch` to `stable` in your private `Config.gs` to follow this fork's changes; the repository copy of `Config.gs` still defaults to `master`. Both channels fetch code at one fixed tag or commit. `Config.gs` and `Filters.gs` in your Apps Script project are retained. Run `PreviewUpdate()` from the editor to preview the selected version and managed files without installing or sending email. `AutoUpdate()` checks and acts on the configured mode; running `install()` recreates the daily update trigger. An existing `checkForUpdate` trigger replaces itself with an `AutoUpdate` trigger on its next run.
 
-Before enabling automatic installation, publish this updated code to the fork and create a release if using release mode. The selected version must contain `AutoUpdate`; older versions are rejected so they cannot remove the updater. Release mode has nothing to install until the fork has a published release. For automatic installation or preview, enable the Apps Script API in the script's Google Cloud project and enable project access at [Apps Script settings](https://script.google.com/home/usersettings). Find the Cloud project number under Apps Script > Project Settings. If you cannot access its default Cloud project in Google Cloud Console, [attach a standard Cloud project](https://developers.google.com/apps-script/guides/cloud-platform-projects#switch_to_a_different_standard_cloud_project), enable the Apps Script API there, and reauthorize the script. After adding the `script.projects` scope, run `PreviewUpdate()` manually in the editor to grant the new permission before relying on the daily trigger. If you only want email notices, set `autoUpdateMode = "email"` and provide `email`.
+Before enabling automatic installation in release mode, publish a release containing the `stable` code. The selected version must contain `AutoUpdate`; older versions are rejected so they cannot remove the updater. Release mode has nothing to install until the fork has a published release. For automatic installation or preview, enable the Apps Script API in the script's Google Cloud project and enable project access at [Apps Script settings](https://script.google.com/home/usersettings). Find the Cloud project number under Apps Script > Project Settings. If you cannot access its default Cloud project in Google Cloud Console, [attach a standard Cloud project](https://developers.google.com/apps-script/guides/cloud-platform-projects#switch_to_a_different_standard_cloud_project), enable the Apps Script API there, and reauthorize the script. After adding the `script.projects` scope, run `PreviewUpdate()` manually in the editor to grant the new permission before relying on the daily trigger. If you only want email notices, set `autoUpdateMode = "email"` and provide `email`.
 
 If GitHub returns HTTP 403 with a rate-limit message, wait for the limit to reset. Without a token, the updater makes two GitHub API requests per check and fetches source files from pinned raw URLs. To authenticate the checks and source downloads, set a GitHub token in Apps Script **Project Settings > Script properties** under the exact key `GITHUB_TOKEN`; an environment variable or user property will not be read. With a token, source files are fetched through GitHub's Contents API, so the token needs read access to the configured repository (for a fine-grained token, grant Contents: read). Keep the token out of `Config.gs` and the repository. The installed Apps Script project must contain this version of `Helpers.gs` before its updater can use the token for source downloads.
 
@@ -67,7 +67,7 @@ To inspect script-created events in one configured target, call `clearGASEvents(
 
 ### Install or update manually
 
-Use [this fork's source files](https://github.com/rufuswilson/GAS-ICS-Sync), including `appsscript.json`. Create a standalone Apps Script project, copy the `.gs` files and manifest into it, then edit `Config.gs` with your own calendar mappings. Enable the Calendar advanced service shown in the manifest; enable Tasks too if you use task syncing. Run `install()` once in the editor to create the sync trigger and grant the requested permissions. Test with a non-critical target calendar before using an existing one.
+Use [the source files on `stable`](https://github.com/rufuswilson/GAS-ICS-Sync/tree/stable), including `appsscript.json`. Create a standalone Apps Script project, copy the `.gs` files and manifest into it, then edit `Config.gs` with your own calendar mappings. Enable the Calendar advanced service shown in the manifest; enable Tasks too if you use task syncing. Run `install()` once in the editor to create the sync trigger and grant the requested permissions. Test with a non-critical target calendar before using an existing one.
 
 For a command-line installation, install [clasp](https://github.com/google/clasp), run `clasp login`, create an Apps Script project in the browser, then run `clasp clone SCRIPT_ID` in a new directory. Copy only this fork's `.gs` files and `appsscript.json` into that cloned directory, set your private `Config.gs`, and run `clasp push`. Keep the cloned directory private because it contains feed URLs and account settings. Run `install()` from the Apps Script editor after the push.
 
@@ -75,8 +75,9 @@ Before a manual update, save copies of your private `Config.gs` and `Filters.gs`
 
 ---------------
 
-### Questions? Comments? Anything else?
-[Join the Discord!](https://discord.gg/DRBpb4k)
+### Community
+
+For questions about the original project, see the [upstream Discord](https://discord.gg/DRBpb4k). For issues with this fork's changes, use [this fork's issues](https://github.com/rufuswilson/GAS-ICS-Sync/issues).
 
 ![Discord](https://img.shields.io/discord/612735135120490496)
 
@@ -84,9 +85,4 @@ Before a manual update, save copies of your private `Config.gs` and `Filters.gs`
 
 ### Contributing
 
-Run `node --test tests/*.test.js` from `rufuswilson/` before submitting changes. The suite includes a syntax and whitespace check for maintained Apps Script files and runs in GitHub Actions.
-
-If you would like to contribute to this repository, please fork the repository, make your changes, and start a pull request. If your pull request is approved, I will add you as a contributer directly to the repository
-
-
-**If you would like to fund an issue, you can do that through here: https://issuehunt.io/repos/136078981/**
+Run `node --test tests/*.test.js` from `rufuswilson/` before submitting changes. The suite includes a syntax and whitespace check for maintained Apps Script files and runs in GitHub Actions. To contribute, make your changes on a branch and open a pull request against `stable`.
