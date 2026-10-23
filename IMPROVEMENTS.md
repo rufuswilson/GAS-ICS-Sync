@@ -8,17 +8,23 @@ Reviewed against `rufuswilson/` on 23 October 2026. It includes `Config.gs`, Goo
 
 ### 6. Unexpected JavaScript runtime exit — Investigate
 
-Source: [#510](https://github.com/derekantrican/GAS-ICS-Sync/issues/510). The same 381 KB Outlook feed worked with a new target but produced an unexpected runtime exit with the old target. That suggests a target-specific stage, but the report has no trace that identifies it. Target events now load in pages of 250, repeated page tokens fail explicitly, and progress logs identify the last completed stage. If it recurs, capture the last stage, approximate target-event count, and execution time before attributing a cause. The platform exit may not be catchable by script code.
+Source: [#510](https://github.com/derekantrican/GAS-ICS-Sync/issues/510).
+
+The same 381 KB Outlook feed worked with a new target but produced an unexpected runtime exit with the old target. That suggests a target-specific stage, but the report has no trace that identifies it. Target events now load in pages of 250, repeated page tokens fail explicitly, and progress logs identify the last completed stage. If it recurs, capture the last stage, approximate target-event count, and execution time before attributing a cause. The platform exit may not be catchable by script code.
 
 ## Event identity, recurrence, and deletions
 
 ### 10. Prevent duplicates when an ICS provider changes UIDs — Partial, Design
 
-Source: [#283](https://github.com/derekantrican/GAS-ICS-Sync/issues/283). The fork now tags target events with a hash of their source address and tests two feeds that reuse the same UID. That solves cross-source UID collisions. It does not solve a provider changing a UID for the *same* event; any fallback matching rule needs a false-match policy and migration tests.
+Source: [#283](https://github.com/derekantrican/GAS-ICS-Sync/issues/283).
+
+The fork now tags target events with a hash of their source address and tests two feeds that reuse the same UID. That solves cross-source UID collisions. It does not solve a provider changing a UID for the *same* event; any fallback matching rule needs a false-match policy and migration tests.
 
 ### 11. Keep manually deleted target events deleted — Design
 
-Source: [PR #482](https://github.com/derekantrican/GAS-ICS-Sync/pull/482). This changes the current source-authoritative behavior. Decide whether it is opt-in and how it interacts with recurring instances, source removals, and `clearGASEvents()` before adapting the PR.
+Source: [PR #482](https://github.com/derekantrican/GAS-ICS-Sync/pull/482).
+
+This changes the current source-authoritative behavior. Decide whether it is opt-in and how it interacts with recurring instances, source removals, and `clearGASEvents()` before adapting the PR.
 
 ## Source access, formats, and security
 
@@ -46,15 +52,27 @@ Sources: issues [#69](https://github.com/derekantrican/GAS-ICS-Sync/issues/69), 
 
 ### 26. Per-source refresh intervals — Design
 
-Sources: [PR #372](https://github.com/derekantrican/GAS-ICS-Sync/pull/372), [PR #463](https://github.com/derekantrican/GAS-ICS-Sync/pull/463); issue [#346](https://github.com/derekantrican/GAS-ICS-Sync/issues/346). These proposals overlap. Do not merge #372 as written: its event-identity change can duplicate existing events. Preserve the fork's current keys and decide how skipped sources affect cleanup when several sources share one target.
+Sources: [PR #372](https://github.com/derekantrican/GAS-ICS-Sync/pull/372), [PR #463](https://github.com/derekantrican/GAS-ICS-Sync/pull/463); issue [#346](https://github.com/derekantrican/GAS-ICS-Sync/issues/346).
+
+These proposals overlap. Do not merge #372 as written: its event-identity change can duplicate existing events. Preserve the fork's current keys and decide how skipped sources affect cleanup when several sources share one target.
 
 ### 27. Sync on event-update triggers — Design
 
-Source: [PR #280](https://github.com/derekantrican/GAS-ICS-Sync/pull/280). Define which calendar changes should trigger a one-way sync and prevent the script's own writes from causing a loop.
+Source: [PR #280](https://github.com/derekantrican/GAS-ICS-Sync/pull/280).
 
-### 28. Parser packaging and HTML interface — Fits as independent projects
+Define which calendar changes should trigger a one-way sync and prevent the script's own writes from causing a loop.
 
-Sources: [#105](https://github.com/derekantrican/GAS-ICS-Sync/issues/105) (minified `ical.js` for editor performance), [#8](https://github.com/derekantrican/GAS-ICS-Sync/issues/8) (HTML UI). Neither blocks sync correctness work.
+### 28. Minify the ICS parser for editor performance — Fits
+
+Source: [#105](https://github.com/derekantrican/GAS-ICS-Sync/issues/105).
+
+Replace the bundled `ical.js.gs` with a reproducibly minified build to reduce editor load time. Keep the source version and parser regression tests available for maintenance.
+
+### 32. Add an HTML interface — Fits
+
+Source: [#8](https://github.com/derekantrican/GAS-ICS-Sync/issues/8).
+
+A UI could guide calendar mapping and filter configuration. Define the setup flow and how it writes `Config.gs` before implementation.
 
 ## Documentation and maintenance
 
@@ -62,10 +80,9 @@ Sources: [#105](https://github.com/derekantrican/GAS-ICS-Sync/issues/105) (minif
 
 Source: [#22](https://github.com/derekantrican/GAS-ICS-Sync/issues/22). This depends on the Google project and deployment; merging code alone will not remove the authorization warning.
 
-
-
-
 # Fixed and tested
+
+## Reliability and data protection
 
 ### 1. Preserve target events when a source fails or is unexpectedly empty — Fixed and covered
 
@@ -99,11 +116,15 @@ Sources: issues [#534](https://github.com/derekantrican/GAS-ICS-Sync/issues/534)
 
 ### 6a. Prevent wrong-target writes and accidental calendar duplication — Fixed and covered
 
-Source: [#514](https://github.com/derekantrican/GAS-ICS-Sync/issues/514). Reporters found redundant “Created by GAS” calendars, and some syncs wrote to one of those instead of the intended target. The exact trigger for the duplicates was not identified. Name-based target lookup now fails on duplicate or read-only matches; a missing target is created only with explicit `createTargetCalendarIfMissing: true`. A `targetId` selects one writable calendar exactly. Tests cover ambiguous names across pages, missing and read-only targets, deliberate creation, and ID selection. This prevents silent wrong-target writes in those cases; live Google behavior remains unverified.
+Source: [#514](https://github.com/derekantrican/GAS-ICS-Sync/issues/514).
+
+Reporters found redundant “Created by GAS” calendars, and some syncs wrote to one of those instead of the intended target. The exact trigger for the duplicates was not identified. Name-based target lookup now fails on duplicate or read-only matches; a missing target is created only with explicit `createTargetCalendarIfMissing: true`. A `targetId` selects one writable calendar exactly. Tests cover ambiguous names across pages, missing and read-only targets, deliberate creation, and ID selection. This prevents silent wrong-target writes in those cases; live Google behavior remains unverified.
 
 ### 7. Multi-calendar loop counter — Fixed and covered
 
 Source: [#521](https://github.com/derekantrican/GAS-ICS-Sync/issues/521). The fork's outer loop does not reuse the reported `i` counter. A regression test confirms that `startSync()` processes two configured target calendars.
+
+## Event identity, recurrence, and deletions
 
 ### 8. Exclude cancelled target events from ordinary updates — Fixed and covered
 
@@ -113,19 +134,29 @@ Cancelled target events are excluded from the ordinary-event lookup and guarded 
 
 ### 9. Keep moved recurring occurrences attached to their original instance — Fixed and covered
 
-Source: [#473](https://github.com/derekantrican/GAS-ICS-Sync/issues/473). The fork uses the original occurrence start as a stable key. Tests now include a representative Outlook ICS fixture with a moved instance, plus existing ICS and Google-source recurrence cases. Live provider behavior remains unverified.
+Source: [#473](https://github.com/derekantrican/GAS-ICS-Sync/issues/473).
+
+The fork uses the original occurrence start as a stable key. Tests now include a representative Outlook ICS fixture with a moved instance, plus existing ICS and Google-source recurrence cases. Live provider behavior remains unverified.
+
+## Source access, formats, and security
 
 ### 13. Match target calendars by ID — Fixed and covered
 
-Source: [PR #531](https://github.com/derekantrican/GAS-ICS-Sync/pull/531). Target mappings now accept `targetId`, checked across calendar-list pages before display names. Missing or unwritable explicit IDs fail without creating a calendar. Tests cover renamed calendars, duplicate display names, and read-only IDs.
+Source: [PR #531](https://github.com/derekantrican/GAS-ICS-Sync/pull/531).
+
+Target mappings now accept `targetId`, checked across calendar-list pages before display names. Missing or unwritable explicit IDs fail without creating a calendar. Tests cover renamed calendars, duplicate display names, and read-only IDs.
 
 ### 14. Decode ICS text as UTF-8 — Fixed and covered
 
-Source: [PR #525](https://github.com/derekantrican/GAS-ICS-Sync/pull/525). ICS responses explicitly use `getContentText("UTF-8")`. A test checks the requested charset and a non-ASCII feed response.
+Source: [PR #525](https://github.com/derekantrican/GAS-ICS-Sync/pull/525).
+
+ICS responses explicitly use `getContentText("UTF-8")`. A test checks the requested charset and a non-ASCII feed response.
 
 ### 15. Support VFREEBUSY-only feeds — Fixed and covered
 
-Source: [PR #528](https://github.com/derekantrican/GAS-ICS-Sync/pull/528). `parseResponses()` synthesizes opaque busy events for non-`FREE` periods only when there are no VEVENTs. Keys are stable per source and interval. Tests cover free periods, busy periods, repeated parsing, and a mixed feed.
+Source: [PR #528](https://github.com/derekantrican/GAS-ICS-Sync/pull/528).
+
+`parseResponses()` synthesizes opaque busy events for non-`FREE` periods only when there are no VEVENTs. Keys are stable per source and interval. Tests cover free periods, busy periods, repeated parsing, and a mixed feed.
 
 ### 16. Preserve event timezones and recognize Webex aliases — Fixed and covered
 
@@ -135,11 +166,17 @@ Added the four US Webex aliases from PR #213 to `tzid.gs`. Tests verify native c
 
 ### 17. Validate HTTPS certificates — Fixed and covered
 
-Source: [#486](https://github.com/derekantrican/GAS-ICS-Sync/issues/486). `UrlFetchApp.fetch()` now uses normal certificate validation. A certificate failure marks the source failed, which blocks target cleanup; a test confirms the private feed URL is redacted in logs.
+Source: [#486](https://github.com/derekantrican/GAS-ICS-Sync/issues/486).
+
+`UrlFetchApp.fetch()` now uses normal certificate validation. A certificate failure marks the source failed, which blocks target cleanup; a test confirms the private feed URL is redacted in logs.
 
 ### 18. Accept absolute VALARM trigger times — Fixed and covered
 
-Source: [#475](https://github.com/derekantrican/GAS-ICS-Sync/issues/475). Absolute VALARM times now convert to reminder minutes before the event; duration triggers retain their existing handling. The test uses the reported `20250114T133635Z` value.
+Source: [#475](https://github.com/derekantrican/GAS-ICS-Sync/issues/475).
+
+Absolute VALARM times now convert to reminder minutes before the event; duration triggers retain their existing handling. The test uses the reported `20250114T133635Z` value.
+
+## Event content and availability
 
 ### 19. Preserve HTML descriptions and omit blank ones — Fixed and covered
 
@@ -155,7 +192,9 @@ Sources: [PR #394](https://github.com/derekantrican/GAS-ICS-Sync/pull/394); issu
 
 ### 22. Map Microsoft tentative events to free — Fixed and covered
 
-Source: [PR #384](https://github.com/derekantrican/GAS-ICS-Sync/pull/384). Optional `mapMicrosoftTentativeToFree` maps the Microsoft marker to `transparency: "transparent"` unless `TRANSP` is explicit. Tests cover the marker, an ordinary tentative event, and explicit opacity.
+Source: [PR #384](https://github.com/derekantrican/GAS-ICS-Sync/pull/384).
+
+Optional `mapMicrosoftTentativeToFree` maps the Microsoft marker to `transparency: "transparent"` unless `TRANSP` is explicit. Tests cover the marker, an ordinary tentative event, and explicit opacity.
 
 ### 23. Reminder precedence and Outlook Safe Links — Fixed and covered
 
@@ -165,7 +204,11 @@ An explicit all-day reminder now survives `addAlerts: "default"`; `"no"` still s
 
 ### 24. Shorter email summaries — Fixed and covered
 
-Source: [PR #462](https://github.com/derekantrican/GAS-ICS-Sync/pull/462). Email subject lines now omit zero-count changes; the detailed body remains. A test checks a single-category summary.
+Source: [PR #462](https://github.com/derekantrican/GAS-ICS-Sync/pull/462).
+
+Email subject lines now omit zero-count changes; the detailed body remains. A test checks a single-category summary.
+
+## Documentation and maintenance
 
 ### 29. Installation, updates, and reauthorization — Fixed and covered
 
@@ -175,4 +218,6 @@ The README now has fork-specific manual installation and `clasp` guidance, a man
 
 ### 30. Tests and style checks — Fixed and covered
 
-Sources: issues [#41](https://github.com/derekantrican/GAS-ICS-Sync/issues/41), [#67](https://github.com/derekantrican/GAS-ICS-Sync/issues/67). The fork now has 76 passing tests, including focused regressions for these fixes. A maintained-source syntax and whitespace check runs with the suite in GitHub Actions; it replaces the proposed external Hound service.
+Sources: issues [#41](https://github.com/derekantrican/GAS-ICS-Sync/issues/41), [#67](https://github.com/derekantrican/GAS-ICS-Sync/issues/67).
+
+The fork now has 76 passing tests, including focused regressions for these fixes. A maintained-source syntax and whitespace check runs with the suite in GitHub Actions; it replaces the proposed external Hound service.
