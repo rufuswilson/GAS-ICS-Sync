@@ -66,7 +66,7 @@
 //!!!!!!!!!!!!!!!! DO NOT EDIT BELOW HERE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING !!!!!!!!!!!!!!!!!!!!
 //=====================================================================================================
 
-var defaultMaxRetries = 10; // Maximum number of retries for api functions (with exponential backoff)
+var currentUserEmail = Session.getActiveUser().getEmail();
 
 function install() {
   // Delete any already existing triggers so we don't create excessive triggers
@@ -88,10 +88,12 @@ function install() {
   ScriptApp.newTrigger("startSync").timeBased().after(1000).create();
 
   // Check the selected GitHub channel once a day.
-  ScriptApp.newTrigger("AutoUpdate")
-    .timeBased()
-    .everyDays(1)
-    .create();
+  if (currentUserEmail == DriveApp.getFileById(ScriptApp.getScriptId()).getOwner().getEmail()) {
+    ScriptApp.newTrigger("AutoUpdate")
+      .timeBased()
+      .everyDays(1)
+      .create();
+  }
 }
 
 function uninstall(){
@@ -182,6 +184,9 @@ function startSync(){
     Logger.log("Another iteration is currently running! Exiting...");
     return;
   }
+  
+  Logger.log("Run by user: " + currentUserEmail);
+  
   try {
 
   //Disable email notification if no mail adress is provided

@@ -61,4 +61,4 @@ var defaultMaxRetries = 10; // Maximum retries for Calendar API calls.
 var autoUpdateRepository = "rufuswilson/GAS-ICS-Sync";
 var autoUpdateMode = "auto";               // "auto" or "email"
 var autoUpdateChannel = "release";         // "release" or "bleeding-edge"
-var autoUpdateBranch = "master";           // Used only for "bleeding-edge"
+var autoUpdateBranch = "stable";           // Used only for "bleeding-edge"
