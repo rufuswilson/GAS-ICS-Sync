@@ -26,6 +26,97 @@ test('retry limit is available from Code.gs without Config.gs', () => {
   assert.equal(context.defaultMaxRetries, 10);
 });
 
+test('sync lock is released after success and after an error', () => {
+  const s = script({});
+  let held = false;
+  let releases = 0;
+  s.LockService = {getScriptLock() { return {
+    tryLock() { if (held) return false; held = true; return true; },
+    releaseLock() { held = false; releases++; },
+  }; }};
+  s.sourceCalendars = [];
+  s.startSync();
+  assert.equal(releases, 1);
+  s.condenseCalendarMap = () => { throw new Error('source failure'); };
+  assert.throws(() => s.startSync(), /source failure/);
+  assert.equal(releases, 2);
+  assert.equal(held, false);
+});
+
+test('target calendar lookup reads later pages before creating a calendar', () => {
+  const pages = [];
+  let created = 0;
+  const s = script({CalendarList: {list(options) {
+    pages.push(options.pageToken || 'first');
+    return options.pageToken ? {items: [{id: 'existing', summary: 'Target', accessRole: 'owner'}]} :
+      {items: [], nextPageToken: 'second'};
+  }}, Calendars: {insert() { created++; return {id: 'new'}; }}});
+  assert.equal(s.setupTargetCalendar('Target').id, 'existing');
+  assert.deepEqual(pages, ['first', 'second']);
+  assert.equal(created, 0);
+  s.Calendar.CalendarList.list = () => null;
+  assert.throws(() => s.setupTargetCalendar('Target'), /Could not list target calendars/);
+});
+
+test('incomplete target event pagination stops the sync and releases its lock', () => {
+  const s = script({Events: {list(_id, options) {
+    return options.pageToken ? null : {items: [], nextPageToken: 'second'};
+  }}});
+  let released = false;
+  let cleaned = false;
+  s.LockService = {getScriptLock() { return {tryLock() { return true; },
+    releaseLock() { released = true; }}; }};
+  s.sourceCalendars = [{source: 'feed.ics', target: 'Target'}];
+  s.fetchSourceCalendars = () => [];
+  s.setupTargetCalendar = () => ({id: 'target'});
+  s.processEventCleanup = () => { cleaned = true; };
+  assert.throws(() => s.startSync(), /Could not list all target events/);
+  assert.equal(cleaned, false);
+  assert.equal(released, true);
+});
+
+test('ICS events with a shared UID update only their own source copy', () => {
+  const updates = [];
+  const s = script({Events: {update(event, _calendar, id) { updates.push(id); return event; }}});
+  const a = s.sourceAddressHash('a.ics');
+  const b = s.sourceAddressHash('b.ics');
+  s.targetCalendarId = 'target';
+  s.calendarEventsIds = ['shared', 'shared'];
+  s.calendarEvents = [
+    {id: 'target-a', extendedProperties: {private: {sourceHash: a, MD5: 'old'}}},
+    {id: 'target-b', extendedProperties: {private: {sourceHash: b, MD5: 'old'}}},
+  ];
+  s.icsEventSourceHashes.shared = [a, b];
+  s.createICSEvent = event => ({summary: event.summary,
+    extendedProperties: {private: {id: 'shared', sourceHash: s.sourceAddressHash(event._sourceAddress), MD5: 'new'}}});
+  s.processICSEvent({_sourceAddress: 'a.ics', summary: 'A', hasProperty() { return false; }}, 'Etc/GMT');
+  s.processICSEvent({_sourceAddress: 'b.ics', summary: 'B', hasProperty() { return false; }}, 'Etc/GMT');
+  assert.deepEqual(updates, ['target-a', 'target-b']);
+});
+
+test('ICS output changes when source settings change', () => {
+  const s = script({newEvent() { return {}; }});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s);
+  const feed = 'BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:one\nDTSTART;VALUE=DATE:20261024\nDTEND;VALUE=DATE:20261025\nSUMMARY:Meeting\nEND:VEVENT\nEND:VCALENDAR';
+  const event = new s.ICAL.Component(s.ICAL.parse(feed)).getAllSubcomponents('vevent')[0];
+  event._sourceAddress = 'feed.ics';
+  event._sourceSettings = {addAlerts: 'yes', defaultAllDayReminder: 30};
+  const first = s.createICSEvent(event, 'Etc/GMT').extendedProperties.private.MD5;
+  event._sourceSettings = {addAlerts: 'yes', defaultAllDayReminder: -1};
+  const second = s.createICSEvent(event, 'Etc/GMT').extendedProperties.private.MD5;
+  assert.notEqual(first, second);
+});
+
+test('exhausted ICS insert retries mark sync failed without a false email entry', () => {
+  const s = script({Events: {insert() { return null; }}});
+  s.targetCalendarId = 'target';
+  s.emailSummary = true;
+  s.createICSEvent = () => ({extendedProperties: {private: {id: 'new', MD5: 'new'}}});
+  s.processICSEvent({hasProperty() { return false; }}, 'Etc/GMT');
+  assert.equal(s.reportOverallFailure, true);
+  assert.equal(s.addedEvents.length, 0);
+});
+
 test('iCal HTTP 429 is retried without logging the private URL', () => {
   const privateUrl = 'https://calendar.google.com/calendar/ical/private-token/basic.ics';
   const logs = [];
@@ -231,6 +322,27 @@ test('recurrence exception patches its original instance, never the next instanc
   s.processICSEventInstance(exception);
   assert.equal(patched.id, 'right');
   assert.equal(patched.body.recurringEventId, undefined);
+});
+
+test('ICS recurrence exception chooses its own source parent when UIDs overlap', () => {
+  let selectedParent;
+  const s = script({Events: {
+    list() { return {items: [
+      {id: 'parent-a', recurrence: ['RRULE:FREQ=DAILY'], extendedProperties: {private:
+        {id: 'shared', fromGAS: 'true', sourceHash: s.sourceAddressHash('a.ics')}}},
+      {id: 'parent-b', recurrence: ['RRULE:FREQ=DAILY'], extendedProperties: {private:
+        {id: 'shared', fromGAS: 'true', sourceHash: s.sourceAddressHash('b.ics')}}},
+    ]}; },
+    instances(_calendar, parent) { selectedParent = parent; return {items: [
+      {id: 'instance', originalStartTime: {date: '2026-10-22'}},
+    ]}; },
+    patch() { return {}; },
+  }});
+  s.targetCalendarId = 'target';
+  s.processICSEventInstance({recurringEventId: '2026-10-22', extendedProperties: {private:
+    {id: 'shared', sourceHash: s.sourceAddressHash('b.ics'), MD5: 'new'}}});
+  assert.equal(selectedParent, 'parent-b');
+  assert.equal(s.reportOverallFailure, false);
 });
 
 test('native cancelled recurrence exception removes only the matching instance', () => {

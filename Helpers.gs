@@ -254,10 +254,20 @@ function findSourceGoogleCalendar(nameOrId){
  * @return {Calendar} The calendar retrieved or created
  */
 function setupTargetCalendar(targetCalendarName){
-  var targetCalendar = Calendar.CalendarList.list({showHidden: true, maxResults: 250}).items.filter(function(cal) {
-    return ((cal.summaryOverride || cal.summary) == targetCalendarName) &&
-                (cal.accessRole == "owner" || cal.accessRole == "writer");
-  })[0];
+  var targetCalendar;
+  var pageToken;
+  do {
+    var options = {showHidden: true, maxResults: 250};
+    if (pageToken) options.pageToken = pageToken;
+    var page = callWithBackoff(function(){ return Calendar.CalendarList.list(options); }, defaultMaxRetries);
+    if (!page) throw new Error("Could not list target calendars");
+    targetCalendar = (page.items || []).filter(function(cal) {
+      return ((cal.summaryOverride || cal.summary) == targetCalendarName) &&
+                  (cal.accessRole == "owner" || cal.accessRole == "writer");
+    })[0];
+    if (targetCalendar) return targetCalendar;
+    pageToken = page.nextPageToken;
+  } while (pageToken);
 
   if(targetCalendar == null){
     Logger.log("Creating Calendar: " + targetCalendarName);
@@ -981,30 +991,50 @@ function processICSEvent(event, calendarTz){
   if (newEvent == null)
     return;
 
-  var index = calendarEventsIds.indexOf(newEvent.extendedProperties.private["id"]);
-  var needsUpdate = index > -1;
-
-  //------------------------ Save instance overrides ------------------------
-  //----------- To make sure the parent event is actually created -----------
+  // Exceptions are patched onto the parent later; they are not ordinary events.
   if (event.hasProperty('recurrence-id')){
     Logger.log("Saving event instance for later: " + newEvent.recurringEventId);
     recurringEvents.push({event: newEvent, settings: settings});
     return;
   }
-  else{
-    //------------------------ Send event object to gcal ------------------------
+
+  var eventId = newEvent.extendedProperties.private.id;
+  var sourceHash = newEvent.extendedProperties.private.sourceHash;
+  var candidates = [];
+  for (var i = 0; i < calendarEventsIds.length; i++) {
+    if (calendarEventsIds[i] === eventId) candidates.push(i);
+  }
+  var index = candidates.filter(function(i){
+    var properties = calendarEvents[i].extendedProperties && calendarEvents[i].extendedProperties.private;
+    return sourceHash && properties && properties.sourceHash === sourceHash;
+  })[0];
+  if (index === undefined && candidates.length === 1) {
+    var existingProperties = calendarEvents[candidates[0]].extendedProperties.private || {};
+    var activeSources = icsEventSourceHashes[eventId] || [];
+    if (!existingProperties.sourceHash && activeSources.length <= 1) index = candidates[0];
+  }
+  if (index === undefined) index = -1;
+  var needsUpdate = index > -1;
+  if (needsUpdate && calendarEvents[index].status !== "cancelled" &&
+      calendarEvents[index].extendedProperties.private.MD5 === newEvent.extendedProperties.private.MD5)
+    return;
+
+  //------------------------ Send event object to gcal ------------------------
     if (needsUpdate){
       if (sourceSetting(settings, "modifyExistingEvents", modifyExistingEvents)){
-        oldEvent = calendarEvents[index]
+        var oldEvent = calendarEvents[index];
         Logger.log("Updating existing event " + newEvent.extendedProperties.private["id"]);
         try{
-          newEvent = callWithBackoff(function(){
+          var updatedEvent = callWithBackoff(function(){
             return Calendar.Events.update(newEvent, targetCalendarId, calendarEvents[index].id);
           }, defaultMaxRetries);
+          if (!updatedEvent) throw new Error("Could not update ICS event " + eventId);
+          newEvent = updatedEvent;
         }
         catch (e){
           Logger.log(`Operation failed with error "${e}"`);
           reportOverallFailure = true;
+          newEvent = null;
         }
         if (newEvent != null && emailSummary){
           modifiedEvents.push([[oldEvent.summary, newEvent.summary, oldEvent.start.date||oldEvent.start.dateTime, newEvent.start.date||newEvent.start.dateTime, oldEvent.end.date||oldEvent.end.dateTime, newEvent.end.date||newEvent.end.dateTime, oldEvent.location, newEvent.location, oldEvent.description, newEvent.description], targetCalendarName]);
@@ -1015,20 +1045,22 @@ function processICSEvent(event, calendarTz){
       if (sourceSetting(settings, "addEventsToCalendar", addEventsToCalendar)){
         Logger.log("Adding new event " + newEvent.extendedProperties.private["id"]);
         try{
-          newEvent = callWithBackoff(function(){
+          var insertedEvent = callWithBackoff(function(){
             return Calendar.Events.insert(newEvent, targetCalendarId);
           }, defaultMaxRetries);
+          if (!insertedEvent) throw new Error("Could not insert ICS event " + eventId);
+          newEvent = insertedEvent;
         }
         catch (e){
           Logger.log(`Operation failed with error "${e}"`);
           reportOverallFailure = true;
+          newEvent = null;
         }
         if (newEvent != null && emailSummary){
           addedEvents.push([[newEvent.summary, newEvent.start.date||newEvent.start.dateTime, newEvent.end.date||newEvent.end.dateTime, newEvent.location, newEvent.description], targetCalendarName]);
         }
       }
     }
-  }
 }
 
 /** Build only writable Google Calendar event fields, then track the source identity. */
@@ -1139,12 +1171,6 @@ function createICSEvent(event, calendarTz){
   var settings = event._sourceSettings;
   event.removeProperty('dtstamp');
   var icalEvent = new ICAL.Event(event);
-
-  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, icalEvent.toString(), Utilities.Charset.UTF_8).toString();
-  if(calendarEventsMD5s.indexOf(digest) >= 0){
-    Logger.log("Skipping unchanged Event " + event.getFirstPropertyValue('uid').toString());
-    return;
-  }
 
   var newEvent =
     callWithBackoff(function() {
@@ -1324,7 +1350,7 @@ function createICSEvent(event, calendarTz){
     newEvent.recurrence = parseICSRecurrenceRule(event, calendarUTCOffset);
   }
 
-  newEvent.extendedProperties = { private: { MD5 : digest, fromGAS : "true", id : icalEvent.uid } };
+  newEvent.extendedProperties = { private: { fromGAS : "true", id : icalEvent.uid } };
   if (event._sourceAddress)
     newEvent.extendedProperties.private.sourceHash = sourceAddressHash(event._sourceAddress);
 
@@ -1342,6 +1368,12 @@ function createICSEvent(event, calendarTz){
     }; //else unsupported value
   }
 
+  // Hash the rendered event after applying source settings and colour.
+  var digestFields = Object.assign({}, newEvent);
+  delete digestFields.extendedProperties;
+  newEvent.extendedProperties.private.MD5 = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.MD5, JSON.stringify(digestFields), Utilities.Charset.UTF_8).toString();
+
   return newEvent;
 }
 
@@ -1353,16 +1385,24 @@ function createICSEvent(event, calendarTz){
  */
 function processICSEventInstance(recEvent, settings){
   var sourceId = recEvent.extendedProperties.private.id;
+  var sourceHash = recEvent.extendedProperties.private.sourceHash;
   var originalStart = recEvent.recurringEventId;
   try {
     var parents = callWithBackoff(function(){
       return Calendar.Events.list(targetCalendarId, {privateExtendedProperty: "id=" + sourceId, maxResults: 2500});
     }, defaultMaxRetries);
     if (!parents) throw new Error("Could not find target recurring parent");
-    var parent = (parents.items || []).filter(function(event){
+    var matchingParents = (parents.items || []).filter(function(event){
       return event.recurrence && event.extendedProperties && event.extendedProperties.private &&
              event.extendedProperties.private.fromGAS === "true" && event.extendedProperties.private.id === sourceId;
+    });
+    var parent = matchingParents.filter(function(event){
+      return sourceHash && event.extendedProperties.private.sourceHash === sourceHash;
     })[0];
+    if (!parent && matchingParents.length === 1 &&
+        !matchingParents[0].extendedProperties.private.sourceHash &&
+        (icsEventSourceHashes[sourceId] || []).length <= 1)
+      parent = matchingParents[0];
     if (!parent) throw new Error("Recurring parent is missing: " + sourceId);
     var instances = callWithBackoff(function(){
       return Calendar.Events.instances(targetCalendarId, parent.id, {originalStart: originalStart, showDeleted: true, maxResults: 2500});

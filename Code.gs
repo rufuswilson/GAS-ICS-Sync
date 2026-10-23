@@ -163,7 +163,6 @@ var calendarEvents = [];
 var calendarEventsIds = [];
 var icsEventsIds = [];
 var icsEventSourceHashes = Object.create(null);
-var calendarEventsMD5s = [];
 var recurringEvents = [];
 var nativeExceptions = [];
 var targetCalendarId;
@@ -178,12 +177,12 @@ var removedEvents = [];
 var reportOverallFailure = false;
 
 function startSync(){
-  if (PropertiesService.getUserProperties().getProperty('LastRun') > 0 && (new Date().getTime() - PropertiesService.getUserProperties().getProperty('LastRun')) < 360000) {
+  var syncLock = LockService.getScriptLock();
+  if (!syncLock.tryLock(1000)) {
     Logger.log("Another iteration is currently running! Exiting...");
     return;
   }
-
-  PropertiesService.getUserProperties().setProperty('LastRun', new Date().getTime());
+  try {
 
   //Disable email notification if no mail adress is provided
   emailSummary = emailSummary && email != "";
@@ -195,7 +194,6 @@ function startSync(){
     calendarEventsIds = [];
     icsEventsIds = [];
     icsEventSourceHashes = Object.create(null);
-    calendarEventsMD5s = [];
     recurringEvents = [];
     nativeExceptions = [];
 
@@ -227,21 +225,22 @@ function startSync(){
         callWithBackoff(function(){
             return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500});
         }, defaultMaxRetries);
-      calendarEvents = [].concat(calendarEvents, eventList.items);
+      if (!eventList) throw new Error("Could not list target events for " + targetCalendarName);
+      calendarEvents = calendarEvents.concat(eventList.items || []);
       //loop until we received all events
-      while(typeof eventList.nextPageToken !== 'undefined'){
+      while (eventList.nextPageToken){
         eventList = callWithBackoff(function(){
           return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500, pageToken: eventList.nextPageToken});
         }, defaultMaxRetries);
 
-        if (eventList != null)
-          calendarEvents = [].concat(calendarEvents, eventList.items);
+        if (!eventList) throw new Error("Could not list all target events for " + targetCalendarName);
+        calendarEvents = calendarEvents.concat(eventList.items || []);
       }
       Logger.log("Fetched " + calendarEvents.length + " existing events from " + targetCalendarName);
       for (var i = 0; i < calendarEvents.length; i++){
         if (calendarEvents[i].extendedProperties != null){
-          calendarEventsIds[i] = calendarEvents[i].extendedProperties.private["rec-id"] || calendarEvents[i].extendedProperties.private["id"];
-          calendarEventsMD5s[i] = calendarEvents[i].extendedProperties.private["MD5"];
+          var privateProperties = calendarEvents[i].extendedProperties.private || {};
+          calendarEventsIds[i] = privateProperties["rec-id"] || privateProperties["id"];
         }
       }
 
@@ -293,11 +292,12 @@ function startSync(){
     sendSummary();
   }
   Logger.log("Sync finished!");
-  PropertiesService.getUserProperties().setProperty('LastRun', 0);
-
   if (reportOverallFailure) {
     // Cause the Google Apps Script "Executions" dashboard to show a failure
     // (the message text does not seem to be logged anywhere)
     throw new Error('The sync operation produced errors. See log for details.');
+  }
+  } finally {
+    syncLock.releaseLock();
   }
 }
