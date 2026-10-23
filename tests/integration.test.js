@@ -43,6 +43,21 @@ test('sync lock is released after success and after an error', () => {
   assert.equal(held, false);
 });
 
+test('sync does no work when another run holds the lock', () => {
+  const s = script({});
+  let releases = 0;
+  let grouped = false;
+  s.LockService = {getScriptLock() { return {
+    tryLock() { return false; },
+    releaseLock() { releases++; },
+  }; }};
+  s.condenseCalendarMap = () => { grouped = true; return []; };
+
+  assert.equal(s.startSync(), undefined);
+  assert.equal(grouped, false);
+  assert.equal(releases, 0);
+});
+
 test('target calendar lookup reads later pages before creating a calendar', () => {
   const pages = [];
   let created = 0;
@@ -71,6 +86,25 @@ test('incomplete target event pagination stops the sync and releases its lock', 
   s.setupTargetCalendar = () => ({id: 'target'});
   s.processEventCleanup = () => { cleaned = true; };
   assert.throws(() => s.startSync(), /Could not list all target events/);
+  assert.equal(cleaned, false);
+  assert.equal(released, true);
+});
+
+test('failed first target page prevents event processing and cleanup', () => {
+  const s = script({Events: {list() { return null; }}});
+  let released = false;
+  let parsed = false;
+  let cleaned = false;
+  s.LockService = {getScriptLock() { return {tryLock() { return true; },
+    releaseLock() { released = true; }}; }};
+  s.sourceCalendars = [{source: 'feed.ics', target: 'Target'}];
+  s.fetchSourceCalendars = () => [];
+  s.setupTargetCalendar = () => ({id: 'target'});
+  s.parseResponses = () => { parsed = true; return []; };
+  s.processEventCleanup = () => { cleaned = true; };
+
+  assert.throws(() => s.startSync(), /Could not list target events/);
+  assert.equal(parsed, false);
   assert.equal(cleaned, false);
   assert.equal(released, true);
 });
