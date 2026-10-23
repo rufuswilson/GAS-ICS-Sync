@@ -520,7 +520,7 @@ function listSourceGoogleEvents(calendarId){
 }
 
 /**
- * Applies filters to source events based on filters defined in filters.gs
+ * Applies filters to source events based on filters defined in Filters.gs
  *
  * @param {Array.ICALComponent} Array with all events from the source calendars
  * @return {Array.ICALComponent} Array with filtered events
@@ -1770,7 +1770,7 @@ function checkForUpdate(){
 /**
  * Check the configured fork for an update. AutoUpdate(true) previews without
  * writing project content or sending an email. The installed Config.gs and
- * filters.gs are always retained, including when the release contains copies.
+ * Filters.gs are always retained, including when the release contains copies.
  */
 function AutoUpdate(dryRun){
   var preview = dryRun === true;
@@ -1834,14 +1834,9 @@ function AutoUpdate(dryRun){
     listing.forEach(function(entry){
       if (entry.type !== "file") return;
       var name = entry.name;
-      if (name === "Config.gs" || name === "filters.gs") return;
+      if (/^(Config|Filters)\.gs$/i.test(name)) return;
       if (!/\.gs$/.test(name) && name !== "appsscript.json") return;
-      var result = autoUpdateGithubJson_(api + "/contents/" + encodeURIComponent(name) +
-        "?ref=" + encodeURIComponent(version.ref));
-      if (result.encoding !== "base64" || !result.content)
-        throw new Error("GitHub did not return file content for " + name);
-      var source = Utilities.newBlob(Utilities.base64Decode(result.content.replace(/\s/g, "")))
-        .getDataAsString("UTF-8");
+      var source = autoUpdateRawFile_(repo, version.ref, name);
       var scriptName = name === "appsscript.json" ? "appsscript" : name.slice(0, -3);
       if (names[scriptName]) throw new Error("Duplicate script file " + scriptName);
       names[scriptName] = true;
@@ -1873,12 +1868,12 @@ function AutoUpdate(dryRun){
     });
     manifest.source = JSON.stringify(manifestObject, null, 2);
     var preserved = current.files.filter(function(file){
-      return !names[file.name] || file.name === "Config" || file.name === "filters";
+      return !names[file.name] || /^(Config|Filters)$/i.test(file.name);
     }).map(function(file){ return {name: file.name, type: file.type, source: file.source}; });
-    if (!preserved.some(function(file){ return file.name === "Config"; }))
+    if (!preserved.some(function(file){ return file.name.toLowerCase() === "config"; }))
       throw new Error("This Apps Script project has no Config.gs to preserve");
-    if (!preserved.some(function(file){ return file.name === "filters"; }))
-      throw new Error("This Apps Script project has no filters.gs to preserve");
+    if (!preserved.some(function(file){ return file.name.toLowerCase() === "filters"; }))
+      throw new Error("This Apps Script project has no Filters.gs to preserve");
     version.files = remoteFiles.map(function(file){ return file.name; });
     if (preview){
       Logger.log("Would install " + version.key + " from " + version.url +
@@ -1896,12 +1891,30 @@ function AutoUpdate(dryRun){
 }
 
 function autoUpdateGithubJson_(url){
+  var headers = {Accept: "application/vnd.github+json", "User-Agent": "GAS-ICS-Sync-AutoUpdate"};
+  var token = PropertiesService.getScriptProperties().getProperty("GITHUB_TOKEN");
+  if (token) headers.Authorization = "Bearer " + token;
   var response = UrlFetchApp.fetch(url, {muteHttpExceptions: true,
-    headers: {Accept: "application/vnd.github+json", "User-Agent": "GAS-ICS-Sync-AutoUpdate"}});
+    headers: headers});
+  var status = response.getResponseCode();
+  if (status < 200 || status >= 300){
+    var responseText = response.getContentText("UTF-8");
+    var message = responseText;
+    try { message = JSON.parse(responseText).message || responseText; } catch (e) {}
+    throw new Error("GitHub API returned HTTP " + status + " for " + url + ": " +
+      String(message).slice(0, 300));
+  }
+  return JSON.parse(response.getContentText("UTF-8"));
+}
+
+function autoUpdateRawFile_(repo, ref, name){
+  var url = "https://raw.githubusercontent.com/" + repo + "/" +
+    encodeURIComponent(ref) + "/" + encodeURIComponent(name);
+  var response = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
   var status = response.getResponseCode();
   if (status < 200 || status >= 300)
-    throw new Error("GitHub API returned HTTP " + status + " for " + url);
-  return JSON.parse(response.getContentText("UTF-8"));
+    throw new Error("GitHub file download returned HTTP " + status + " for " + name);
+  return response.getContentText("UTF-8");
 }
 
 function autoUpdateScriptRequest_(url, method, body){
@@ -1913,8 +1926,15 @@ function autoUpdateScriptRequest_(url, method, body){
   }
   var response = UrlFetchApp.fetch(url, options);
   var status = response.getResponseCode();
-  if (status < 200 || status >= 300)
-    throw new Error("Apps Script API returned HTTP " + status + ": " + response.getContentText("UTF-8").slice(0, 300));
+  if (status < 200 || status >= 300){
+    var errorText = response.getContentText("UTF-8");
+    if (status === 403 && /Apps Script API has not been used in project|Apps Script API.*disabled/i.test(errorText))
+      throw new Error("Enable the Apps Script API in this script's Google Cloud project, then retry. " +
+        "Find the project in Apps Script > Project Settings. If its default Cloud project is inaccessible, " +
+        "attach a standard Cloud project first. Also enable Apps Script API access at " +
+        "https://script.google.com/home/usersettings.");
+    throw new Error("Apps Script API returned HTTP " + status + ": " + errorText.slice(0, 300));
+  }
   return JSON.parse(response.getContentText("UTF-8"));
 }
 

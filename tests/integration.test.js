@@ -13,7 +13,7 @@ function script(calendar, options = {}) {
       computeDigest(_algorithm, value) { return Array.from(Buffer.from(value)); }, sleep() {}},
     CalendarApp: {EventColor: {BLUE: '9', RED: '11'}},
   });
-  for (const filename of ['Config.gs', 'Code.gs', 'filters.gs', 'Helpers.gs']) {
+  for (const filename of ['Config.gs', 'Code.gs', 'Filters.gs', 'Helpers.gs']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', filename), 'utf8'), context, {filename});
   }
   if (!options.realBackoff) context.callWithBackoff = fn => fn();

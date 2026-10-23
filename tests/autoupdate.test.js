@@ -16,10 +16,11 @@ const sources = {
   'tzid.gs': 'var tzid = {};',
   'appsscript.json': JSON.stringify({runtimeVersion: 'V8', oauthScopes: []}),
   'Config.gs': 'var sourceCalendars = [];',
-  'filters.gs': 'var filters = [];',
+  'Filters.gs': 'var filters = [];',
 };
 
 function setup(options = {}) {
+  const remoteSources = {...sources};
   const calls = [];
   const writes = [];
   const emails = [];
@@ -27,7 +28,7 @@ function setup(options = {}) {
   const currentFiles = [
     {name: 'Code', type: 'SERVER_JS', source: 'old code'},
     {name: 'Config', type: 'SERVER_JS', source: 'private config'},
-    {name: 'filters', type: 'SERVER_JS', source: 'private filters'},
+    {name: 'Filters', type: 'SERVER_JS', source: 'private filters'},
     {name: 'appsscript', type: 'JSON', source: JSON.stringify({oauthScopes: ['old.scope']})},
   ];
   const response = (status, body) => ({
@@ -60,11 +61,11 @@ function setup(options = {}) {
       if (url === repoApi + '/branches/master')
         return response(200, {commit: {sha: 'a'.repeat(40)}});
       if (url.startsWith(repoApi + '/contents?ref='))
-        return response(200, Object.keys(sources).map(name => ({name, type: 'file'})));
-      const match = url.match(/\/contents\/([^?]+)\?ref=(.+)$/);
-      if (match && sources[decodeURIComponent(match[1])] !== undefined)
-        return response(200, {encoding: 'base64',
-          content: Buffer.from(sources[decodeURIComponent(match[1])]).toString('base64')});
+        return response(200, Object.keys(remoteSources).map(name => ({name, type: 'file'})));
+      const raw = url.match(/^https:\/\/raw\.githubusercontent\.com\/rufuswilson\/GAS-ICS-Sync\/([^/]+)\/([^/]+)$/);
+      if (raw && remoteSources[decodeURIComponent(raw[2])] !== undefined)
+        return {getResponseCode() { return 200; }, getContentText() {
+          return remoteSources[decodeURIComponent(raw[2])]; }};
       return response(404, {});
     }},
   });
@@ -77,7 +78,7 @@ function setup(options = {}) {
     autoUpdateBranch: 'master',
     email: 'person@example.com',
   });
-  return {context, calls, writes, emails, properties, sources};
+  return {context, calls, writes, emails, properties, sources: remoteSources};
 }
 
 test('installs a pinned release while preserving private configuration', () => {
@@ -86,12 +87,14 @@ test('installs a pinned release while preserving private configuration', () => {
   assert.equal(s.writes.length, 1);
   const files = s.writes[0].files;
   assert.equal(files.find(file => file.name === 'Config').source, 'private config');
-  assert.equal(files.find(file => file.name === 'filters').source, 'private filters');
+  assert.equal(files.find(file => file.name === 'Filters').source, 'private filters');
   assert.equal(files.find(file => file.name === 'Helpers').source, sources['Helpers.gs']);
   const scopes = JSON.parse(files.find(file => file.name === 'appsscript').source).oauthScopes;
   assert.ok(scopes.includes('old.scope'));
   assert.ok(scopes.includes('https://www.googleapis.com/auth/script.projects'));
-  assert.ok(s.calls.filter(call => call.url.includes('/contents/')).every(call => call.url.endsWith('ref=v2.0')));
+  assert.equal(s.calls.filter(call => call.url.startsWith(repoApi)).length, 2);
+  assert.ok(s.calls.filter(call => call.url.startsWith('https://raw.githubusercontent.com/'))
+    .every(call => call.url.includes('/v2.0/')));
   s.context.AutoUpdate();
   assert.equal(s.writes.length, 1);
 });
@@ -109,7 +112,8 @@ test('bleeding-edge pins a commit and rejects a release missing the updater', ()
   const s = setup({channel: 'bleeding-edge'});
   s.context.AutoUpdate(true);
   assert.equal(s.writes.length, 0);
-  assert.ok(s.calls.filter(call => call.url.includes('/contents/')).every(call => call.url.endsWith('ref=' + 'a'.repeat(40))));
+  assert.ok(s.calls.filter(call => call.url.startsWith('https://raw.githubusercontent.com/'))
+    .every(call => call.url.includes('/' + 'a'.repeat(40) + '/')));
   s.sources['Helpers.gs'] = 'function helper() {}';
   assert.throws(() => s.context.AutoUpdate(), /does not contain AutoUpdate/);
   assert.equal(s.writes.length, 0);
@@ -135,4 +139,25 @@ test('old update trigger migrates once without touching sync triggers', () => {
   assert.equal(s.calls.length, 0);
   s.context.checkForUpdate();
   assert.equal(triggers.length, 2);
+});
+
+test('disabled Apps Script API error explains the Cloud project setup', () => {
+  const s = setup();
+  s.context.UrlFetchApp.fetch = () => ({
+    getResponseCode() { return 403; },
+    getContentText() { return JSON.stringify({error: {message:
+      'Apps Script API has not been used in project 915358193318 before or it is disabled.'}}); },
+  });
+  assert.throws(() => s.context.autoUpdateScriptRequest_(projectApi, 'get'),
+    /Enable the Apps Script API in this script's Google Cloud project/);
+});
+
+test('GitHub 403 includes the API error reason', () => {
+  const s = setup();
+  s.context.UrlFetchApp.fetch = () => ({
+    getResponseCode() { return 403; },
+    getContentText() { return JSON.stringify({message: 'API rate limit exceeded'}); },
+  });
+  assert.throws(() => s.context.autoUpdateGithubJson_(repoApi + '/releases/latest'),
+    /API rate limit exceeded/);
 });
