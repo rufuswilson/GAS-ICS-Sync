@@ -11,8 +11,8 @@ const repoApi = 'https://api.github.com/repos/rufuswilson/GAS-ICS-Sync';
 const projectApi = 'https://script.googleapis.com/v1/projects/project-id/content';
 const latest = {tag_name: 'v2.0', html_url: 'https://github.com/rufuswilson/GAS-ICS-Sync/releases/tag/v2.0'};
 const sources = {
-  'Code.gs': 'function startSync() {}',
-  'Helpers.gs': 'function AutoUpdate() {}',
+  'Code.gs': 'function startSync() {}\nfunction AutoUpdate(dryRun) { return AutoUpdateImpl_(dryRun); }',
+  'Helpers.gs': 'function AutoUpdateImpl_() {}',
   'ical.js.gs': 'var ICAL = {};',
   'tzid.gs': 'var tzid = {};',
   'appsscript.json': JSON.stringify({runtimeVersion: 'V8', oauthScopes: []}),
@@ -139,6 +139,14 @@ test('bleeding-edge pins a commit and rejects a release missing the updater', ()
     .every(call => call.url.includes('/' + 'a'.repeat(40) + '/')));
   s.sources['Helpers.gs'] = 'function helper() {}';
   assert.throws(() => s.context.AutoUpdate(), /does not contain AutoUpdate/);
+  assert.equal(s.writes.length, 0);
+});
+
+test('updater accepts a legacy version with AutoUpdate in Helpers.gs', () => {
+  const s = setup();
+  s.sources['Code.gs'] = 'function startSync() {}';
+  s.sources['Helpers.gs'] = 'function AutoUpdate() {}';
+  s.context.AutoUpdate(true);
   assert.equal(s.writes.length, 0);
 });
 

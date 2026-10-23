@@ -2104,12 +2104,28 @@ function checkForUpdate() {
   });
 }
 
+// Identify the account running a manual sync or owning its scheduled trigger.
+function getSyncUserEmail_() {
+  if (typeof Session === "undefined") return ""; // Allows local tests to load this file.
+  var activeEmail = Session.getActiveUser().getEmail();
+  var effectiveEmail = Session.getEffectiveUser().getEmail();
+  return String(activeEmail || effectiveEmail || "").toLowerCase();
+}
+
+/** Run from the editor to confirm which account the script can identify. */
+function ShowCurrentUserEmail() {
+  var userEmail = getSyncUserEmail_();
+  if (!userEmail) throw new Error("Apps Script did not provide an account email");
+  Logger.log("Run by user: " + userEmail);
+  return userEmail;
+}
+
 /**
  * Check the configured fork for an update. AutoUpdate(true) previews without
  * writing project content or sending an email. The installed Config.gs and
  * Filters.gs are always retained, including when the release contains copies.
  */
-function AutoUpdate(dryRun) {
+function AutoUpdateImpl_(dryRun) {
   var preview = dryRun === true;
   var repo = String(autoUpdateRepository || "");
   var mode = String(autoUpdateMode || "");
@@ -2187,7 +2203,11 @@ function AutoUpdate(dryRun) {
       if (!names[required]) throw new Error("Release is missing " + required);
     });
     var remoteHelpers = remoteFiles.filter(function (file) { return file.name === "Helpers"; })[0].source;
-    if (!/function\s+AutoUpdate\s*\(/.test(remoteHelpers))
+    var remoteCode = remoteFiles.filter(function (file) { return file.name === "Code"; })[0].source;
+    var hasLegacyUpdater = /function\s+AutoUpdate\s*\(/.test(remoteHelpers);
+    var hasSplitUpdater = /function\s+AutoUpdateImpl_\s*\(/.test(remoteHelpers) &&
+      /function\s+AutoUpdate\s*\(/.test(remoteCode);
+    if (!hasLegacyUpdater && !hasSplitUpdater)
       throw new Error("Selected version does not contain AutoUpdate; publish this updater to the fork first");
 
     var manifest = remoteFiles.filter(function (file) { return file.name === "appsscript"; })[0];

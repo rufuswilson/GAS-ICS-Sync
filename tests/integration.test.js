@@ -51,12 +51,12 @@ test('new sync options have defaults when an older private Config.gs omits them'
 });
 
 test('configuration finds the active email and falls back to the trigger owner', () => {
-  const config = fs.readFileSync(path.join(__dirname, '..', 'Config.gs'), 'utf8');
+  const helpers = fs.readFileSync(path.join(__dirname, '..', 'Helpers.gs'), 'utf8');
   const context = vm.createContext({Session: {
     getActiveUser() { return {getEmail() { return ''; }}; },
     getEffectiveUser() { return {getEmail() { return 'Owner@Example.com'; }}; },
   }});
-  vm.runInContext(config, context);
+  vm.runInContext(helpers, context);
   assert.equal(context.getSyncUserEmail_(), 'owner@example.com');
   context.Session.getActiveUser = () => ({getEmail() { return 'Active@Example.com'; }});
   assert.equal(context.getSyncUserEmail_(), 'active@example.com');

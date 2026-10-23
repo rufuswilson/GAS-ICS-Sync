@@ -89,6 +89,11 @@ function CheckCurrentUserEmail() {
   return ShowCurrentUserEmail();
 }
 
+/** Public entry point used by the daily update trigger and manual runs. */
+function AutoUpdate(dryRun) {
+  return AutoUpdateImpl_(dryRun);
+}
+
 function install() {
   // Delete any already existing triggers so we don't create excessive triggers
   deleteAllTriggers();
