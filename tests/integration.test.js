@@ -331,6 +331,40 @@ test('native source settings override global event settings without affecting an
   assert.equal(unchanged.colorId, '11');
 });
 
+test('native all-day and fallback reminders follow ICS setting precedence', () => {
+  const s = script({});
+  const source = {calendar: {id: 'source-id', summary: 'Source'}, settings: {
+    addAlerts: 'yes', defaultAllDayReminder: 30, fallbackReminderMinutes: 15,
+  }};
+  const allDay = {id: 'day', start: {date: '2026-10-24'}, end: {date: '2026-10-25'}};
+  const timed = {id: 'timed', start: {dateTime: '2026-10-24T09:00:00Z'},
+    end: {dateTime: '2026-10-24T10:00:00Z'}};
+  assert.equal(s.makeNativeEvent(allDay, source).reminders.overrides[0].minutes, 30);
+  assert.equal(s.makeNativeEvent(timed, source).reminders.overrides[0].minutes, 15);
+  const withAlarm = {...allDay, reminders: {useDefault: false,
+    overrides: [{method: 'popup', minutes: 5}]}};
+  assert.equal(s.makeNativeEvent(withAlarm, source).reminders.overrides[0].minutes, 5);
+  source.settings.addAlerts = 'default';
+  assert.equal(s.makeNativeEvent(allDay, source).reminders.overrides[0].minutes, 30);
+  assert.equal(s.makeNativeEvent(timed, source).reminders.useDefault, true);
+  source.settings.addAlerts = 'no';
+  assert.equal(s.makeNativeEvent(allDay, source).reminders.overrides.length, 0);
+});
+
+test('native date filtering uses the current instant for events and recurrence queries', () => {
+  let query;
+  const s = script({Events: {instances(_calendarId, _eventId, options) {
+    query = options;
+    return {items: []};
+  }}});
+  const reference = {toJSDate() { return new Date('2026-10-23T15:00:00Z'); }};
+  const filter = {parameter: 'dtstart', comparison: '>'};
+  assert.equal(s.nativeDateMatches({start: {dateTime: '2026-10-23T09:00:00Z'}}, filter, reference), false);
+  assert.equal(s.nativeDateMatches({start: {dateTime: '2026-10-23T16:00:00Z'}}, filter, reference), true);
+  s.nativeRecurrenceMatches({id: 'series'}, filter, reference, 'source-id');
+  assert.equal(query.timeMin, '2026-10-23T15:00:00.000Z');
+});
+
 test('ICS source settings reach event creation', () => {
   const s = script({newEvent() { return {}; }});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s, {filename: 'ical.js.gs'});
@@ -502,7 +536,7 @@ test('date filter retains a Google recurrence with future instances and drops pa
     instanceQueries++;
     return {items: [{start: {date: '2026-10-24'}, end: {date: '2026-10-25'}}]};
   }}});
-  s.ICAL = {Time: {fromJSDate: function() { return {adjust() { return this; }, toString() { return '2026-10-23'; }}; }}};
+  s.ICAL = {Time: {fromJSDate: function() { return {adjust() { return this; }, toJSDate() { return new Date('2026-10-23T00:00:00Z'); }}; }}};
   s.filters = [{parameter: 'dtend', type: 'include', comparison: '>', offset: 0}];
   const events = [
     {id: 'past', start: {date: '2026-10-20'}, end: {date: '2026-10-21'}},
@@ -536,7 +570,7 @@ test('future filter copies Google recurrence instances as stable individual even
     insert(body) { inserted.push(body); return Object.assign({id: 'target-instance'}, body); },
     update(body, _calendarId, id) { updated.push({body, id}); return Object.assign({id}, body); },
   }});
-  s.ICAL = {Time: {fromJSDate: function() { return {adjust() { return this; }, toString() { return date(0); }}; }}};
+  s.ICAL = {Time: {fromJSDate: function() { return {adjust() { return this; }, toJSDate() { return new Date(date(0) + 'T00:00:00Z'); }}; }}};
   s.filters = [{parameter: 'dtend', type: 'include', comparison: '>', offset: 0}];
   s.targetCalendarId = 'target-id';
   const source = {kind: 'google', calendar: {id: 'source-id', summary: 'Source'}, source: 'source-id'};
@@ -567,7 +601,7 @@ test('materialized instances inherit attendee details and failed expansion block
     instances() { return {items: [{id: 'instance', recurringEventId: 'series',
       originalStartTime: {date: '2026-10-24'}, start: {date: '2026-10-24'}, end: {date: '2026-10-25'}}]}; },
   }});
-  s.ICAL = {Time: {fromJSDate: function() { return {adjust() { return this; }, toString() { return '2026-10-23'; }}; }}};
+  s.ICAL = {Time: {fromJSDate: function() { return {adjust() { return this; }, toJSDate() { return new Date('2026-10-23T00:00:00Z'); }}; }}};
   s.filters = [
     {parameter: 'dtend', type: 'include', comparison: '>', offset: 0},
     {parameter: 'attendee', type: 'exclude', comparison: 'equals', criterias: ['skip@example.com']},

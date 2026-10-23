@@ -209,32 +209,43 @@ function startSync(){
     var vevents;
 
     //------------------------ Fetch URL items ------------------------
+    Logger.log("Fetching source calendars");
     var responses = fetchSourceCalendars(sourceCalendarURLs);
     Logger.log("Syncing " + responses.length + " calendars to " + targetCalendarName);
     // A failed source must never make its existing target events look obsolete.
     var sourceFetchFailed = responses.failed === true;
 
     //------------------------ Get target calendar information------------------------
-    var targetCalendar = setupTargetCalendar(targetCalendarName, calendar.targetId);
+    var targetCalendar = setupTargetCalendar(targetCalendarName, calendar.targetId,
+      calendar.createTargetCalendarIfMissing);
     targetCalendarId = targetCalendar.id;
     Logger.log("Working on calendar: " + targetCalendarId);
 
     //------------------------ Parse existing events --------------------------
     if(canAddOrModify || canRemove){
+      // Smaller pages avoid one very large Calendar API response for an old target.
+      var targetEventPageSize = 250;
+      Logger.log("Listing existing target events");
       var eventList =
         callWithBackoff(function(){
-            return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500});
+            return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: targetEventPageSize});
         }, defaultMaxRetries);
       if (!eventList) throw new Error("Could not list target events for " + targetCalendarName);
       calendarEvents = calendarEvents.concat((eventList.items || []).filter(function(event){ return event.status !== "cancelled"; }));
+      Logger.log("Listed " + calendarEvents.length + " active target events so far");
       //loop until we received all events
+      var seenTargetPageTokens = Object.create(null);
       while (eventList.nextPageToken){
+        if (seenTargetPageTokens[eventList.nextPageToken])
+          throw new Error("Repeated target-event page token for " + targetCalendarName);
+        seenTargetPageTokens[eventList.nextPageToken] = true;
         eventList = callWithBackoff(function(){
-          return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500, pageToken: eventList.nextPageToken});
+          return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: targetEventPageSize, pageToken: eventList.nextPageToken});
         }, defaultMaxRetries);
 
         if (!eventList) throw new Error("Could not list all target events for " + targetCalendarName);
         calendarEvents = calendarEvents.concat((eventList.items || []).filter(function(event){ return event.status !== "cancelled"; }));
+        Logger.log("Listed " + calendarEvents.length + " active target events so far");
       }
       Logger.log("Fetched " + calendarEvents.length + " existing events from " + targetCalendarName);
       for (var i = 0; i < calendarEvents.length; i++){
@@ -245,6 +256,7 @@ function startSync(){
       }
 
       //------------------------ Parse ical events --------------------------
+      Logger.log("Parsing source events");
       vevents = parseResponses(responses);
       sourceFetchFailed = responses.failed === true;
       Logger.log("Parsed " + vevents.length + " events from sources");
@@ -258,9 +270,10 @@ function startSync(){
           return Calendar.Settings.get("timezone").value;
         }, defaultMaxRetries);
 
-      vevents.forEach(function(e){
+      vevents.forEach(function(e, index){
         if (e.nativeEvent) processNativeEvent(e);
         else processICSEvent(e, calendarTz);
+        if ((index + 1) % 100 === 0) Logger.log("Processed " + (index + 1) + " of " + vevents.length + " source events");
       });
 
       Logger.log("Done processing events");

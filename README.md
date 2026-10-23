@@ -17,9 +17,9 @@ var sourceCalendars = [
 
 The previous array format remains supported, including mixed configurations: `[source, target]` or `[source, target, colour]`.
 
-`target` names the target calendar. For a renamed target or duplicate display names, add `targetId` with its exact Google Calendar ID. The script fails if that ID is missing or not writable. Use the same `targetId` on every mapping sharing a target.
+`target` names the target calendar. For a renamed target or duplicate display names, add `targetId` with its exact Google Calendar ID. The script fails if that ID is missing or not writable. Name-based selection also fails when several calendars have that name or the only match is read-only. A missing target is not created automatically; set `createTargetCalendarIfMissing: true` on a mapping only when you intend to create it. Use the same target ID and creation setting on every mapping sharing a target.
 
-Internally, `condenseCalendarMap` groups entries as `{target, targetId, sources}`. Each source is an object with named fields. Object mappings can override these settings for that source: `defaultColor`, `addAlerts`, `addOrganizerToTitle`, `descriptionAsTitles`, `addCalToTitle`, `addAttendees`, `defaultAllDayReminder`, `overrideVisibility`, `recurringInstanceWindowDays`, `addEventsToCalendar`, `modifyExistingEvents`, `removeEventsFromCalendar`, `removePastEventsFromCalendar`, `skipIfEmptyFeed`, `pastEventWindowDays`, `titlePrefix`, `titlePrefixAllDayOnly`, `mapMicrosoftTentativeToFree`, `fallbackReminderMinutes`, and `decodeOutlookSafeLinks`. Unspecified settings use their global `Config.gs` values; an explicit `false` overrides a global `true`. For example:
+Internally, `condenseCalendarMap` groups entries as `{target, targetId, createTargetCalendarIfMissing, sources}`. Each source is an object with named fields. Object mappings can override these settings for that source: `defaultColor`, `addAlerts`, `addOrganizerToTitle`, `descriptionAsTitles`, `addCalToTitle`, `addAttendees`, `defaultAllDayReminder`, `overrideVisibility`, `recurringInstanceWindowDays`, `addEventsToCalendar`, `modifyExistingEvents`, `removeEventsFromCalendar`, `removePastEventsFromCalendar`, `skipIfEmptyFeed`, `pastEventWindowDays`, `titlePrefix`, `titlePrefixAllDayOnly`, `mapMicrosoftTentativeToFree`, `fallbackReminderMinutes`, and `decodeOutlookSafeLinks`. Unspecified settings use their global `Config.gs` values; an explicit `false` overrides a global `true`. For example:
 
 ```javascript
 {source: "https://example.com/events.ics", target: "Target",
@@ -27,13 +27,15 @@ Internally, `condenseCalendarMap` groups entries as `{target, targetId, sources}
   removeEventsFromCalendar: true, removePastEventsFromCalendar: false}
 ```
 
+To create a new target on its first sync, set `createTargetCalendarIfMissing: true` on that target's mapping. After creation, copy its calendar ID into `targetId` and remove the creation option. This prevents a later rename or transient lookup failure from creating another calendar.
+
 `colour` takes precedence over both the source's `defaultColor` and the global `defaultColor`. Copied events store a hash of the configured source address so cleanup can apply that source's removal settings without storing the address itself. Existing events are tagged when they still match one unambiguous source event. Older events that no longer match a source are preserved because their source cannot be identified safely. Task cleanup remains controlled by the global setting.
 
 `skipIfEmptyFeed` defaults to `true`. If a successfully fetched ICS or Google Calendar source contains no active events (including a feed with only cancelled events), sync marks the run failed and preserves existing target events while continuing to process other sources. Set it to `false` on a source only when an intentionally empty source should clear its target events. This checks the source before event filters, so a filter that excludes every event does not count as an empty feed.
 
 `pastEventWindowDays` defaults to `null` (all history). Set a non-negative number of days globally or per source to skip older, completed events while retaining recurring series. Target events older than that source's window are preserved during cleanup. The source is still fetched in full before this filter is applied. `maxCleanupDeletesPerRun` defaults to `100`; cleanup stores a cursor per target and resumes deletion in later sync runs. A failed deletion is reported and does not appear as a successful removal in the email summary.
 
-ICS feeds are decoded as UTF-8 and require valid HTTPS certificates. VFREEBUSY-only feeds create one opaque “Busy” event per non-free interval; VEVENTs take precedence in mixed feeds. `titlePrefix` adds text before copied titles, and `titlePrefixAllDayOnly: true` limits it to all-day events. `mapMicrosoftTentativeToFree: true` maps Microsoft's tentative busy marker to free unless `TRANSP` is explicit. `fallbackReminderMinutes` adds a popup when `addAlerts: "yes"` finds no usable alarm; `defaultAllDayReminder` takes precedence over calendar defaults for all-day events. `decodeOutlookSafeLinks: true` replaces recognized Outlook Safe Links in ICS descriptions with their target URL.
+ICS feeds are decoded as UTF-8 and require valid HTTPS certificates. VFREEBUSY-only feeds create one opaque “Busy” event per non-free interval; VEVENTs take precedence in mixed feeds. `titlePrefix` adds text before copied titles, and `titlePrefixAllDayOnly: true` limits it to all-day events. `mapMicrosoftTentativeToFree: true` maps Microsoft's tentative busy marker to free unless `TRANSP` is explicit. For ICS and Google Calendar sources, `fallbackReminderMinutes` adds a popup when `addAlerts: "yes"` finds no usable explicit reminder; `defaultAllDayReminder` takes precedence over calendar defaults for all-day events. `decodeOutlookSafeLinks: true` replaces recognized Outlook Safe Links in ICS descriptions with their target URL.
 
 ### Updates from this fork
 
@@ -56,6 +58,12 @@ If GitHub returns HTTP 403 with a rate-limit message, wait for the limit to rese
 Set `defaultColor` in `Config.gs` to a `CalendarApp.EventColor` value (for example, `CalendarApp.EventColor.RED`) to colour events from sources without an explicit `colour`. A source's `colour` takes precedence. Leave `defaultColor = true` to retain source and calendar colours.
 
 Google Calendar sources copy ordinary and recurring events and their recurrence overrides. The script skips removal from a target when any of its sources cannot be read.
+
+### Diagnosing missing events or an unexpected runtime exit
+
+If a run reports newly copied events but none appear in the expected calendar, check the target calendar ID in the execution log and the IDs of calendars with duplicate display names. Set `targetId` to the intended writable calendar. The script now stops on an ambiguous name or missing target instead of silently creating a second calendar.
+
+For an unexpected JavaScript runtime exit, inspect the last progress message: “Fetching source calendars,” “Listing existing target events,” “Listed … active target events so far,” “Parsing source events,” or “Processed … source events.” This narrows the exit to fetching, reading the target, parsing, or saving events. Target events are fetched in pages of 250. If the error persists, record the last progress message, approximate target-event count, execution time, and whether the same source succeeds with a separate target. Keep private feed URLs and event details out of shared logs.
 
 ### Filters and cleanup
 

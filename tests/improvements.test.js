@@ -57,6 +57,56 @@ test('target calendar ID beats duplicate names, and missing or read-only IDs fai
   ]), /Conflicting target IDs/);
 });
 
+test('ambiguous, missing, and read-only target names never create a calendar silently', () => {
+  let created = 0;
+  const pages = {
+    first: {items: [{id: 'one', summary: 'Shared', accessRole: 'owner'},
+      {id: 'read-only', summary: 'Read only', accessRole: 'reader'}], nextPageToken: 'second'},
+    second: {items: [{id: 'two', summary: 'Shared', accessRole: 'writer'}]},
+  };
+  const {s} = app({CalendarList: {list(options) { return pages[options.pageToken || 'first']; }},
+    newCalendar() { return {}; }, Settings: {get() { return {value: 'Etc/GMT'}; }},
+    Calendars: {insert(calendar) { created++; return {...calendar, id: 'created'}; }}});
+  assert.throws(() => s.setupTargetCalendar('Shared'), /Multiple target calendars.*targetId/);
+  assert.throws(() => s.setupTargetCalendar('Read only'), /not writable/);
+  assert.throws(() => s.setupTargetCalendar('Missing'), /Target calendar not found/);
+  assert.equal(created, 0);
+  assert.equal(s.setupTargetCalendar('Shared', 'two').id, 'two');
+  assert.equal(s.setupTargetCalendar('New target', undefined, true).id, 'created');
+  assert.equal(created, 1);
+  assert.equal(s.condenseCalendarMap([{source: 'feed.ics', target: 'New target',
+    createTargetCalendarIfMissing: true}])[0].createTargetCalendarIfMissing, true);
+  assert.throws(() => s.condenseCalendarMap([
+    {source: 'a.ics', target: 'New target', createTargetCalendarIfMissing: true},
+    {source: 'b.ics', target: 'New target', createTargetCalendarIfMissing: false},
+  ]), /Conflicting target creation settings/);
+});
+
+test('target reads use bounded pages and log progress for runtime diagnosis', () => {
+  const {s, logs} = app({Events: {list(_calendarId, options) {
+    assert.equal(options.maxResults, 250);
+    return options.pageToken ? {items: []} : {items: [], nextPageToken: 'second'};
+  }}, Settings: {get() { return {value: 'Etc/GMT'}; }}});
+  s.LockService = {getScriptLock() { return {tryLock() { return true; }, releaseLock() {}}; }};
+  s.sourceCalendars = [{source: 'private-feed.ics', target: 'Target', removeEventsFromCalendar: false}];
+  s.fetchSourceCalendars = () => [];
+  s.setupTargetCalendar = () => ({id: 'target'});
+  s.parseResponses = () => [];
+  s.startSync();
+  assert.ok(logs.some(line => line.includes('Listing existing target events')));
+  assert.equal(logs.filter(line => line.includes('active target events so far')).length, 2);
+  assert.equal(logs.join('\n').includes('private-feed.ics'), false);
+});
+
+test('repeated target page tokens fail instead of looping indefinitely', () => {
+  const {s} = app({Events: {list() { return {items: [], nextPageToken: 'again'}; }}});
+  s.LockService = {getScriptLock() { return {tryLock() { return true; }, releaseLock() {}}; }};
+  s.sourceCalendars = [{source: 'feed.ics', target: 'Target'}];
+  s.fetchSourceCalendars = () => [];
+  s.setupTargetCalendar = () => ({id: 'target'});
+  assert.throws(() => s.startSync(), /Repeated target-event page token/);
+});
+
 test('ICS download explicitly uses UTF-8 and certificate validation', () => {
   const {s} = app();
   let options;

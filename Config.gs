@@ -3,7 +3,9 @@
 */
 
 var sourceCalendars = [                // One entry per source. source can be an ICS URL or a Google Calendar ID/name.
-                                       // target is the target calendar name; targetId optionally selects an exact writable calendar ID. colour is optional; see
+                                       // target is the target calendar name; targetId selects an exact writable calendar ID.
+                                       // Set createTargetCalendarIfMissing: true only when intentionally creating a new target.
+                                       // colour is optional; see
                                        // https://developers.google.com/apps-script/reference/calendar/event-color
                                        // Event settings can be overridden on a source entry: defaultColor,
                                        // addAlerts, addOrganizerToTitle, descriptionAsTitles, addCalToTitle,
@@ -31,7 +33,7 @@ var skipIfEmptyFeed = true;                // Preserve target events when a fetc
 var pastEventWindowDays = null;            // null syncs all past events; otherwise sync only events ending within this many days.
 var maxCleanupDeletesPerRun = 100;        // Maximum target-event deletion attempts per sync; later runs resume the remainder.
 var recurringInstanceWindowDays = 180;    // Future date filters copy recurring ICS and Google occurrences this many days ahead as individual events.
-var addAlerts = "yes";                    // Whether to add the ics/ical alerts as notifications on the Google Calendar events or revert to the calendar's default reminders ("yes", "no", "default").
+var addAlerts = "yes";                    // Whether to copy source alerts or use the target calendar's default reminders ("yes", "no", "default").
 var addOrganizerToTitle = false;          // Whether to prefix the event name with the event organiser for further clarity
 var descriptionAsTitles = false;          // Whether to use the ics/ical descriptions as titles (true) or to use the normal titles as titles (false)
 var addCalToTitle = false;                // Whether to add the source calendar to title
@@ -41,7 +43,7 @@ var defaultAllDayReminder = -1;           // Default reminder for all day events
 var titlePrefix = "";                     // Optional prefix for copied event titles.
 var titlePrefixAllDayOnly = false;        // Apply titlePrefix only to all-day events.
 var mapMicrosoftTentativeToFree = false;  // Treat Microsoft's tentative busy status as free unless TRANSP explicitly says otherwise.
-var fallbackReminderMinutes = -1;        // Optional popup reminder when an ICS event has no valid VALARM.
+var fallbackReminderMinutes = -1;        // Optional popup reminder when a source event has no usable explicit reminder.
 var decodeOutlookSafeLinks = false;       // Decode recognized Outlook Safe Links in descriptions.
 var overrideVisibility = "";              // Changes the visibility of the event ("default", "public", "private", "confidential"). Anything else will revert to the class value of the ICAL event.
 var defaultColor = true;                 // true keeps source/calendar colours; otherwise use a CalendarApp.EventColor value when a source has no colour.

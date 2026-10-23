@@ -1,14 +1,14 @@
 # Improvements to consider from upstream
 
-Reviewed against `rufuswilson/` on 23 October 2026. It includes `Config.gs`, Google Calendar source support, per-source settings, filters, an auto-updater, and regression tests. The upstream inventory comprises 25 open pull requests and 39 open issues from the earlier upstream review. These are feature bundles, not instructions to merge every PR. All 71 local tests passed; live Google Calendar behavior was not tested.
+Reviewed against `rufuswilson/` on 23 October 2026. It includes `Config.gs`, Google Calendar source support, per-source settings, filters, an auto-updater, and regression tests. The upstream inventory comprises 25 open pull requests and 39 open issues from the earlier upstream review. These are feature bundles, not instructions to merge every PR. All 76 local tests passed; live Google Calendar behavior was not tested.
 
 **Status:** The **Fixed and tested** section contains locally implemented items with regression tests. **Partial** means more work or verification is needed; **Design** needs a behavior or migration decision; **Investigate** lacks a confirmed cause. Priorities indicate a suggested order, not upstream severity.
 
 ## Reliability and data protection
 
-### 6. Other runtime reports — Investigate
+### 6. Unexpected JavaScript runtime exit — Investigate
 
-Sources: [#514](https://github.com/derekantrican/GAS-ICS-Sync/issues/514) (new Outlook events fetched but not saved), [#510](https://github.com/derekantrican/GAS-ICS-Sync/issues/510) (unexpected runtime exit). Capture a redacted input, execution log, and target-event state before choosing a fix.
+Source: [#510](https://github.com/derekantrican/GAS-ICS-Sync/issues/510). The same 381 KB Outlook feed worked with a new target but produced an unexpected runtime exit with the old target. That suggests a target-specific stage, but the report has no trace that identifies it. Target events now load in pages of 250, repeated page tokens fail explicitly, and progress logs identify the last completed stage. If it recurs, capture the last stage, approximate target-event count, and execution time before attributing a cause. The platform exit may not be catchable by script code.
 
 ## Event identity, recurrence, and deletions
 
@@ -62,6 +62,9 @@ Sources: [#105](https://github.com/derekantrican/GAS-ICS-Sync/issues/105) (minif
 
 Source: [#22](https://github.com/derekantrican/GAS-ICS-Sync/issues/22). This depends on the Google project and deployment; merging code alone will not remove the authorization warning.
 
+
+
+
 ## Fixed and tested
 
 ### 1. Preserve target events when a source fails or is unexpectedly empty — Fixed and covered
@@ -93,6 +96,10 @@ ICS and Google-source insert/update paths catch errors and mark the run failed. 
 Sources: issues [#534](https://github.com/derekantrican/GAS-ICS-Sync/issues/534), [#505](https://github.com/derekantrican/GAS-ICS-Sync/issues/505).
 
 `pastEventWindowDays` now optionally skips old completed ICS and Google-source events while retaining recurring parents; cleanup preserves target events older than the same source's window. `maxCleanupDeletesPerRun` bounds deletion attempts and stores a per-target cursor for later runs. Tests cover both source types, old-target preservation, and resumption across runs. Source feeds and target event lists are still fetched in full, so exceptionally large reads can still reach the Apps Script execution limit.
+
+### 6a. Prevent wrong-target writes and accidental calendar duplication — Fixed and covered
+
+Source: [#514](https://github.com/derekantrican/GAS-ICS-Sync/issues/514). Reporters found redundant “Created by GAS” calendars, and some syncs wrote to one of those instead of the intended target. The exact trigger for the duplicates was not identified. Name-based target lookup now fails on duplicate or read-only matches; a missing target is created only with explicit `createTargetCalendarIfMissing: true`. A `targetId` selects one writable calendar exactly. Tests cover ambiguous names across pages, missing and read-only targets, deliberate creation, and ID selection. This prevents silent wrong-target writes in those cases; live Google behavior remains unverified.
 
 ### 7. Multi-calendar loop counter — Fixed and covered
 
@@ -168,4 +175,4 @@ The README now has fork-specific manual installation and `clasp` guidance, a man
 
 ### 30. Tests and style checks — Fixed and covered
 
-Sources: issues [#41](https://github.com/derekantrican/GAS-ICS-Sync/issues/41), [#67](https://github.com/derekantrican/GAS-ICS-Sync/issues/67). The fork now has 71 passing tests, including focused regressions for these fixes. A maintained-source syntax and whitespace check runs with the suite in GitHub Actions; it replaces the proposed external Hound service.
+Sources: issues [#41](https://github.com/derekantrican/GAS-ICS-Sync/issues/41), [#67](https://github.com/derekantrican/GAS-ICS-Sync/issues/67). The fork now has 76 passing tests, including focused regressions for these fixes. A maintained-source syntax and whitespace check runs with the suite in GitHub Actions; it replaces the proposed external Hound service.

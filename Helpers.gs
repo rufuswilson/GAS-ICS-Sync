@@ -97,6 +97,7 @@ function condenseCalendarMap(calendarMap){
     var source = Array.isArray(mapping) ? {source: mapping[0], colour: mapping[2]} : Object.assign({}, mapping);
     delete source.target;
     delete source.targetId;
+    delete source.createTargetCalendarIfMissing;
     var index = -1;
     for (var i = 0; i < result.length; i++){
       if (result[i].target == target){
@@ -108,10 +109,17 @@ function condenseCalendarMap(calendarMap){
     if (index > -1)
       result[index].sources.push(source);
     else
-      result.push({target: target, targetId: mapping.targetId, sources: [source]});
+      result.push({target: target, targetId: mapping.targetId,
+        createTargetCalendarIfMissing: mapping.createTargetCalendarIfMissing, sources: [source]});
     if (index > -1 && mapping.targetId && result[index].targetId && mapping.targetId !== result[index].targetId)
       throw new Error("Conflicting target IDs for " + target);
     if (index > -1 && mapping.targetId) result[index].targetId = mapping.targetId;
+    if (index > -1 && mapping.createTargetCalendarIfMissing !== undefined) {
+      var existingChoice = result[index].createTargetCalendarIfMissing;
+      if (existingChoice !== undefined && existingChoice !== mapping.createTargetCalendarIfMissing)
+        throw new Error("Conflicting target creation settings for " + target);
+      result[index].createTargetCalendarIfMissing = mapping.createTargetCalendarIfMissing;
+    }
   }
 
   return result;
@@ -299,13 +307,13 @@ function findSourceGoogleCalendar(nameOrId){
 
 /**
  * Gets the user's Google Calendar with the specified name.
- * A new Calendar will be created if the user does not have a Calendar with the specified name.
+ * A new Calendar is created only when explicitly requested by its mapping.
  *
  * @param {string} targetCalendarName - The name of the calendar to return
  * @return {Calendar} The calendar retrieved or created
  */
-function setupTargetCalendar(targetCalendarName, explicitId){
-  var targetCalendar;
+function setupTargetCalendar(targetCalendarName, explicitId, createIfMissing){
+  var nameMatches = [];
   var idMatch;
   var pageToken;
   do {
@@ -320,28 +328,32 @@ function setupTargetCalendar(targetCalendarName, explicitId){
         throw new Error("Target calendar is not writable: " + (explicitId || targetCalendarName));
       return idMatch;
     }
-    targetCalendar = targetCalendar || items.filter(function(cal) {
-      return (cal.summaryOverride === targetCalendarName || cal.summary === targetCalendarName) &&
-             (cal.accessRole === "owner" || cal.accessRole === "writer");
-    })[0];
+    if (!explicitId) nameMatches = nameMatches.concat(items.filter(function(cal) {
+      return cal.summaryOverride === targetCalendarName || cal.summary === targetCalendarName;
+    }));
     pageToken = page.nextPageToken;
   } while (pageToken);
 
   if (explicitId) throw new Error("Target calendar ID not found: " + explicitId);
-  if (targetCalendar) return targetCalendar;
+  if (nameMatches.length > 1)
+    throw new Error("Multiple target calendars named " + targetCalendarName + "; set targetId in Config.gs");
+  if (nameMatches.length === 1) {
+    if (nameMatches[0].accessRole !== "owner" && nameMatches[0].accessRole !== "writer")
+      throw new Error("Target calendar is not writable: " + targetCalendarName);
+    return nameMatches[0];
+  }
   if (/@|^[a-f0-9]{32,}$/.test(targetCalendarName))
     throw new Error("Target calendar ID not found or not writable: " + targetCalendarName);
+  if (createIfMissing !== true)
+    throw new Error("Target calendar not found: " + targetCalendarName +
+      ". Check its name or set targetId; set createTargetCalendarIfMissing: true to create it deliberately.");
 
-  if(targetCalendar == null){
-    Logger.log("Creating Calendar: " + targetCalendarName);
-    targetCalendar = Calendar.newCalendar();
-    targetCalendar.summary = targetCalendarName;
-    targetCalendar.description = "Created by GAS";
-    targetCalendar.timeZone = Calendar.Settings.get("timezone").value;
-    targetCalendar = Calendar.Calendars.insert(targetCalendar);
-  }
-
-  return targetCalendar;
+  Logger.log("Creating Calendar: " + targetCalendarName);
+  var targetCalendar = Calendar.newCalendar();
+  targetCalendar.summary = targetCalendarName;
+  targetCalendar.description = "Created by GAS";
+  targetCalendar.timeZone = Calendar.Settings.get("timezone").value;
+  return Calendar.Calendars.insert(targetCalendar);
 }
 
 /**
@@ -784,14 +796,14 @@ function nativeDateMatches(event, filter, reference){
   var value = nativeEventTime(event, filter.parameter.toLowerCase());
   if (!value) return false;
   var eventTime = new Date(value).getTime();
-  var referenceTime = new Date(reference.toString().slice(0, 10) + "T00:00:00Z").getTime();
+  var referenceTime = reference.toJSDate().getTime();
   if (filter.comparison === ">") return eventTime > referenceTime;
   if (filter.comparison === "<") return eventTime < referenceTime;
   throw new Error("Unsupported date filter comparison: " + filter.comparison);
 }
 
 function nativeRecurrenceMatches(event, filter, reference, calendarId){
-  var referenceTime = new Date(reference.toString().slice(0, 10) + "T00:00:00Z").toISOString();
+  var referenceTime = reference.toJSDate().toISOString();
   var options = {maxResults: 2500, showDeleted: false};
   if (filter.comparison === ">") options.timeMin = referenceTime;
   else options.timeMax = referenceTime;
@@ -1202,7 +1214,30 @@ function makeNativeEvent(sourceEvent, source, sourceKey, materialized){
     copy.visibility = visibility;
   var alerts = sourceSetting(settings, "addAlerts", addAlerts);
   if (alerts === "no") copy.reminders = {useDefault: false, overrides: []};
-  else if (alerts === "default") copy.reminders = {useDefault: true};
+  else {
+    var allDayReminder = sourceSetting(settings, "defaultAllDayReminder", defaultAllDayReminder);
+    var isAllDay = !!(copy.start && copy.start.date);
+    var validAllDayReminder = isAllDay && 0 <= allDayReminder && allDayReminder <= 40320;
+    if (alerts === "default") {
+      copy.reminders = validAllDayReminder ?
+        {useDefault: false, overrides: [{method: "popup", minutes: allDayReminder}]} :
+        {useDefault: true};
+    } else if (alerts === "yes") {
+      var sourceOverrides = copy.reminders && copy.reminders.overrides;
+      var hasSourceReminders = sourceOverrides && sourceOverrides.length > 0;
+      if (!hasSourceReminders && validAllDayReminder)
+        copy.reminders = {useDefault: false, overrides: [{method: "popup", minutes: allDayReminder}]};
+      else if (!hasSourceReminders) {
+        var fallbackMinutes = sourceSetting(settings, "fallbackReminderMinutes", fallbackReminderMinutes);
+        if (0 <= fallbackMinutes && fallbackMinutes <= 40320)
+          copy.reminders = {useDefault: false, overrides: [{method: "popup", minutes: fallbackMinutes}]};
+        else if (isAllDay)
+          copy.reminders = {useDefault: false, overrides: []};
+        else
+          copy.reminders = {useDefault: true};
+      }
+    }
+  }
   var id = sourceKey || nativeEventKey(source.calendar.id, sourceEvent.id);
   var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(copy), Utilities.Charset.UTF_8).toString();
   copy.extendedProperties = {private: {fromGAS: "true", id: id, MD5: digest,
