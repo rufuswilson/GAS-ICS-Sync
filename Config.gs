@@ -3,14 +3,18 @@
 */
 
 var sourceCalendars = [                // One entry per source. source can be an ICS URL or a Google Calendar ID/name.
-                                       // target is the target calendar name. colour is optional; see
+                                       // target is the target calendar name; targetId optionally selects an exact writable calendar ID. colour is optional; see
                                        // https://developers.google.com/apps-script/reference/calendar/event-color
                                        // Event settings can be overridden on a source entry: defaultColor,
                                        // addAlerts, addOrganizerToTitle, descriptionAsTitles, addCalToTitle,
                                        // addAttendees, defaultAllDayReminder, overrideVisibility,
                                        // recurringInstanceWindowDays, addEventsToCalendar,
                                        // modifyExistingEvents, removeEventsFromCalendar,
-                                       // removePastEventsFromCalendar. Unspecified settings use global values.
+                                       // removePastEventsFromCalendar, skipIfEmptyFeed,
+                                       // pastEventWindowDays. Unspecified settings use global values.
+                                       // Other optional source settings: titlePrefix, titlePrefixAllDayOnly,
+                                       // mapMicrosoftTentativeToFree, fallbackReminderMinutes,
+                                       // decodeOutlookSafeLinks.
                                        // Legacy [source, target, colour] entries are also supported.
   {source: "icsUrl1", target: "targetCalendar1"},
   {source: "icsUrl2", target: "targetCalendar2", colour: "11"},
@@ -23,6 +27,9 @@ var addEventsToCalendar = true;           // If you turn this to "false", you ca
 var modifyExistingEvents = true;          // If you turn this to "false", any event in the feed that was modified after being added to the calendar will not update
 var removeEventsFromCalendar = true;      // If you turn this to "true", any event created by the script that is not found in the feed will be removed.
 var removePastEventsFromCalendar = true;  // If you turn this to "false", any event that is in the past will not be removed.
+var skipIfEmptyFeed = true;                // Preserve target events when a fetched source has no active events; set false for intentional clearing.
+var pastEventWindowDays = null;            // null syncs all past events; otherwise sync only events ending within this many days.
+var maxCleanupDeletesPerRun = 100;        // Maximum target-event deletion attempts per sync; later runs resume the remainder.
 var recurringInstanceWindowDays = 180;    // Future date filters copy recurring ICS and Google occurrences this many days ahead as individual events.
 var addAlerts = "yes";                    // Whether to add the ics/ical alerts as notifications on the Google Calendar events or revert to the calendar's default reminders ("yes", "no", "default").
 var addOrganizerToTitle = false;          // Whether to prefix the event name with the event organiser for further clarity
@@ -30,7 +37,12 @@ var descriptionAsTitles = false;          // Whether to use the ics/ical descrip
 var addCalToTitle = false;                // Whether to add the source calendar to title
 var addAttendees = false;                 // Whether to add the attendee list. If true, duplicate events will be automatically added to the attendees' calendar.
 var defaultAllDayReminder = -1;           // Default reminder for all day events in minutes before the day of the event (-1 = no reminder, the value has to be between 0 and 40320)
-                                          // See https://github.com/derekantrican/GAS-ICS-Sync/issues/75 for why this is neccessary.
+                                          // See https://github.com/derekantrican/GAS-ICS-Sync/issues/75 for why this is necessary.
+var titlePrefix = "";                     // Optional prefix for copied event titles.
+var titlePrefixAllDayOnly = false;        // Apply titlePrefix only to all-day events.
+var mapMicrosoftTentativeToFree = false;  // Treat Microsoft's tentative busy status as free unless TRANSP explicitly says otherwise.
+var fallbackReminderMinutes = -1;        // Optional popup reminder when an ICS event has no valid VALARM.
+var decodeOutlookSafeLinks = false;       // Decode recognized Outlook Safe Links in descriptions.
 var overrideVisibility = "";              // Changes the visibility of the event ("default", "public", "private", "confidential"). Anything else will revert to the class value of the ICAL event.
 var defaultColor = true;                 // true keeps source/calendar colours; otherwise use a CalendarApp.EventColor value when a source has no colour.
 var addTasks = false;

@@ -6,12 +6,18 @@ const vm = require('node:vm');
 
 function script(calendar, options = {}) {
   const logs = options.logs || [];
+  const properties = new Map();
   const context = vm.createContext({
     Calendar: calendar,
     Logger: {log(message) { logs.push(String(message)); }},
     Utilities: {Charset: {UTF_8: 'UTF_8'}, DigestAlgorithm: {MD5: 'MD5'},
       computeDigest(_algorithm, value) { return Array.from(Buffer.from(value)); }, sleep() {}},
     CalendarApp: {EventColor: {BLUE: '9', RED: '11'}},
+    PropertiesService: {getScriptProperties() { return {
+      getProperty(key) { return properties.get(key) || null; },
+      setProperty(key, value) { properties.set(key, String(value)); },
+      deleteProperty(key) { properties.delete(key); },
+    }; }},
   });
   for (const filename of ['Config.gs', 'Code.gs', 'Filters.gs', 'Helpers.gs']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', filename), 'utf8'), context, {filename});
@@ -168,6 +174,85 @@ test('iCal HTTP 429 is retried without logging the private URL', () => {
   assert.equal(responses.length, 1);
   assert.equal(responses.failed, undefined);
   assert.equal(logs.join('\n').includes(privateUrl), false);
+});
+
+test('an empty ICS source blocks target cleanup while another source still syncs', () => {
+  const fullFeed = 'BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:keep\nDTSTART;VALUE=DATE:20261024\nDTEND;VALUE=DATE:20261025\nSUMMARY:Keep\nEND:VEVENT\nEND:VCALENDAR';
+  const emptyFeed = 'BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR';
+  const s = script({Events: {list() { return {items: []}; }}, Settings: {get() { return {value: 'Etc/GMT'}; }}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s);
+  s.LockService = {getScriptLock() { return {tryLock() { return true; }, releaseLock() {}}; }};
+  s.sourceCalendars = [
+    {source: 'https://example.com/empty.ics', target: 'Target'},
+    {source: 'https://example.com/full.ics', target: 'Target'},
+  ];
+  s.UrlFetchApp = {fetch(url) { return {getResponseCode() { return 200; },
+    getContentText() { return url.includes('empty') ? emptyFeed : fullFeed; }}; }};
+  s.setupTargetCalendar = () => ({id: 'target'});
+  const processed = [];
+  let cleaned = false;
+  s.processICSEvent = event => { processed.push(event.getFirstPropertyValue('uid')); };
+  s.processEventCleanup = () => { cleaned = true; };
+
+  assert.throws(() => s.startSync(), /sync operation produced errors/);
+  assert.deepEqual(processed, ['keep']);
+  assert.equal(cleaned, false);
+});
+
+test('an intentionally empty source can permit cleanup', () => {
+  const s = script({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s);
+  const responses = [{kind: 'ics', source: 'empty.ics', settings: {skipIfEmptyFeed: false},
+    content: 'BEGIN:VCALENDAR\nVERSION:2.0\nEND:VCALENDAR'}];
+  assert.equal(s.parseResponses(responses).length, 0);
+  assert.equal(responses.failed, undefined);
+});
+
+test('filtering every event does not classify a populated feed as empty', () => {
+  const s = script({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s);
+  s.filters = [{parameter: 'summary', type: 'exclude', comparison: 'equals', criterias: ['Meeting']}];
+  const responses = [{kind: 'ics', source: 'feed.ics', settings: {}, content:
+    'BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:one\nDTSTART;VALUE=DATE:20261024\nDTEND;VALUE=DATE:20261025\nSUMMARY:Meeting\nEND:VEVENT\nEND:VCALENDAR'}];
+  assert.equal(s.parseResponses(responses).length, 0);
+  assert.equal(responses.failed, undefined);
+});
+
+test('a feed containing only cancelled events cannot clear the target by default', () => {
+  const s = script({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s);
+  const responses = [{kind: 'ics', source: 'feed.ics', settings: {}, content:
+    'BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:cancelled\nDTSTART;VALUE=DATE:20261024\nDTEND;VALUE=DATE:20261025\nSTATUS:CANCELLED\nEND:VEVENT\nEND:VCALENDAR'}];
+  assert.equal(s.parseResponses(responses).length, 0);
+  assert.equal(responses.failed, true);
+});
+
+test('an empty Google Calendar source marks the target unsafe for cleanup', () => {
+  const s = script({Events: {list() { return {items: []}; }}});
+  s.targetCalendarId = 'target';
+  const responses = [{kind: 'google', source: 'source-id', settings: {},
+    calendar: {id: 'source-id', summary: 'Source'}}];
+  assert.equal(s.parseResponses(responses).length, 0);
+  assert.equal(responses.failed, true);
+  assert.equal(s.reportOverallFailure, true);
+});
+
+test('startSync processes each configured target calendar', () => {
+  const s = script({Events: {list() { return {items: []}; }},
+    Settings: {get() { return {value: 'Etc/GMT'}; }}});
+  s.LockService = {getScriptLock() { return {tryLock() { return true; }, releaseLock() {}}; }};
+  s.sourceCalendars = [
+    {source: 'one.ics', target: 'First'},
+    {source: 'two.ics', target: 'Second'},
+  ];
+  s.fetchSourceCalendars = () => [];
+  s.setupTargetCalendar = name => ({id: name});
+  s.parseResponses = () => [];
+  const processed = [];
+  s.processEventCleanup = () => { processed.push(s.targetCalendarName); };
+
+  s.startSync();
+  assert.deepEqual(processed, ['First', 'Second']);
 });
 
 test('calendar groups use named fields and retain per-source settings', () => {
@@ -536,6 +621,119 @@ test('cleanup honors removal settings for each hashed source and preserves unkno
   assert.deepEqual(removed, ['a-future']);
 });
 
+test('cleanup reports an exhausted delete retry and continues without a false summary entry', () => {
+  const removed = [];
+  const s = script({Events: {remove(_calendar, id) { removed.push(id); }}});
+  s.targetCalendarId = 'target';
+  s.emailSummary = true;
+  s.calendarEventsIds = ['failed', 'ok'];
+  const sourceHash = s.sourceAddressHash('feed.ics');
+  s.calendarEvents = s.calendarEventsIds.map(id => ({id, summary: id,
+    start: {date: '2099-01-01'}, end: {date: '2099-01-02'},
+    extendedProperties: {private: {sourceHash}}}));
+  let calls = 0;
+  s.callWithBackoff = fn => ++calls === 1 ? null : fn();
+
+  s.processEventCleanup([{source: 'feed.ics'}]);
+  assert.deepEqual(removed, ['ok']);
+  assert.equal(s.reportOverallFailure, true);
+  assert.equal(s.removedEvents.length, 1);
+  assert.equal(s.removedEvents[0][0][0], 'ok');
+});
+
+test('cleanup tolerates an already-deleted event without reporting a new failure', () => {
+  const removed = [];
+  const s = script({Events: {remove(_calendar, id) {
+    if (id === 'gone') throw Error('Resource has been deleted');
+    removed.push(id);
+  }}});
+  s.targetCalendarId = 'target';
+  s.emailSummary = true;
+  s.calendarEventsIds = ['gone', 'ok'];
+  const sourceHash = s.sourceAddressHash('feed.ics');
+  s.calendarEvents = s.calendarEventsIds.map(id => ({id,
+    summary: id, start: {date: '2099-01-01'}, end: {date: '2099-01-02'},
+    extendedProperties: {private: {sourceHash}}}));
+
+  s.processEventCleanup([{source: 'feed.ics'}]);
+  assert.deepEqual(removed, ['ok']);
+  assert.equal(s.removedEvents.length, 1);
+  assert.equal(s.reportOverallFailure, false);
+});
+
+test('cleanup skips a missing target ID and reports it', () => {
+  let removeCalled = false;
+  const s = script({Events: {remove() { removeCalled = true; }}});
+  s.targetCalendarId = 'target';
+  s.calendarEventsIds = ['source-id'];
+  s.calendarEvents = [{start: {date: '2099-01-01'}, end: {date: '2099-01-02'},
+    extendedProperties: {private: {sourceHash: s.sourceAddressHash('feed.ics')}}}];
+  s.processEventCleanup([{source: 'feed.ics'}]);
+  assert.equal(removeCalled, false);
+  assert.equal(s.reportOverallFailure, true);
+});
+
+test('cleanup deletion batches resume across runs', () => {
+  const removed = [];
+  const s = script({Events: {remove(_calendar, id) { removed.push(id); }}});
+  s.targetCalendarId = 'target';
+  s.maxCleanupDeletesPerRun = 2;
+  const sourceHash = s.sourceAddressHash('feed.ics');
+  const events = Array.from({length: 5}, (_, index) => ({id: 'target-' + index,
+    start: {date: '2099-01-01'}, end: {date: '2099-01-02'},
+    extendedProperties: {private: {id: 'source-' + index, sourceHash}}}));
+  for (let run = 0; run < 3; run++) {
+    s.calendarEvents = events.filter(event => !removed.includes(event.id));
+    s.calendarEventsIds = s.calendarEvents.map(event => event.extendedProperties.private.id);
+    const before = removed.length;
+    s.processEventCleanup([{source: 'feed.ics'}]);
+    assert.ok(removed.length - before <= 2);
+  }
+  assert.deepEqual(removed.slice().sort(), events.map(event => event.id).sort());
+});
+
+test('past window omits old ICS and Google events but retains recurring parents', () => {
+  const s = script({Events: {list() { return {items: [
+    {id: 'old', start: {date: daysFromNow(-101)}, end: {date: daysFromNow(-100)}},
+    {id: 'recent', start: {date: daysFromNow(-2)}, end: {date: daysFromNow(-1)}},
+    {id: 'series', start: {date: daysFromNow(-101)}, end: {date: daysFromNow(-100)},
+      recurrence: ['RRULE:FREQ=DAILY']},
+  ]}; }}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s);
+  function daysFromNow(days) { return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10); }
+  function icsDate(days) { return daysFromNow(days).replace(/-/g, ''); }
+  const feed = 'BEGIN:VCALENDAR\nVERSION:2.0\n' +
+    ['old', 'recent', 'series'].map((uid, index) => {
+      const start = index === 1 ? -2 : -101;
+      return 'BEGIN:VEVENT\nUID:' + uid + '\nDTSTART;VALUE=DATE:' + icsDate(start) +
+        '\nDTEND;VALUE=DATE:' + icsDate(start + 1) + '\nSUMMARY:' + uid +
+        (uid === 'series' ? '\nRRULE:FREQ=DAILY' : '') + '\nEND:VEVENT\n';
+    }).join('') + 'END:VCALENDAR';
+  const settings = {pastEventWindowDays: 30};
+  const ics = s.parseResponses([{kind: 'ics', source: 'feed.ics', settings, content: feed}]);
+  assert.deepEqual(Array.from(ics, event => event.getFirstPropertyValue('uid')).sort(), ['recent', 'series']);
+  s.targetCalendarId = 'target';
+  s.icsEventsIds = [];
+  const native = s.parseResponses([{kind: 'google', source: 'source-id', settings,
+    calendar: {id: 'source-id', summary: 'Source'}}]);
+  assert.deepEqual(Array.from(native, item => item.nativeEvent.id).sort(), ['recent', 'series']);
+});
+
+test('past window protects old target events while deleting recent obsolete ones', () => {
+  const removed = [];
+  const s = script({Events: {remove(_calendar, id) { removed.push(id); }}});
+  s.targetCalendarId = 'target';
+  s.calendarEventsIds = ['old', 'recent'];
+  const sourceHash = s.sourceAddressHash('feed.ics');
+  const day = offset => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+  s.calendarEvents = [
+    {id: 'old', start: {date: day(-101)}, end: {date: day(-100)}, extendedProperties: {private: {sourceHash}}},
+    {id: 'recent', start: {date: day(-2)}, end: {date: day(-1)}, extendedProperties: {private: {sourceHash}}},
+  ];
+  s.processEventCleanup([{source: 'feed.ics', pastEventWindowDays: 30}]);
+  assert.deepEqual(removed, ['recent']);
+});
+
 test('cleanup backfills the source hash only for an unambiguous live legacy event', () => {
   const patches = [];
   const s = script({Events: {patch(body, _calendarId, id) { patches.push({body, id}); return {id}; }}});
@@ -631,14 +829,16 @@ test('future-filtered ICS series copies stable individual instances with overrid
     return date.toISOString().replace(/[-:]/g, '').replace(/\.000Z$/, 'Z');
   };
   const feed = `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:series\nDTSTART:${stamp(-1)}\nDTEND:${stamp(-1, 11)}\nRRULE:FREQ=DAILY;COUNT=5\nSUMMARY:Original\nEND:VEVENT\nBEGIN:VEVENT\nUID:series\nRECURRENCE-ID:${stamp(1)}\nDTSTART:${stamp(1, 12)}\nDTEND:${stamp(1, 13)}\nSUMMARY:Moved\nEND:VEVENT\nBEGIN:VEVENT\nUID:series\nRECURRENCE-ID:${stamp(2)}\nDTSTART:${stamp(2)}\nDTEND:${stamp(2, 11)}\nSTATUS:CANCELLED\nEND:VEVENT\nEND:VCALENDAR`;
+  const todayOccurrenceIsFuture = day.getTime() + 10 * 3600000 > Date.now();
   const parsed = s.parseResponses([{source: 'feed.ics', content: feed}]);
-  assert.equal(parsed.length, 3);
+  assert.equal(parsed.length, todayOccurrenceIsFuture ? 3 : 2);
   assert.ok(parsed.every(event => !event.hasProperty('rrule') && !event.hasProperty('recurrence-id')));
-  assert.deepEqual(Array.from(parsed, event => event.getFirstPropertyValue('summary')).sort(), ['Moved', 'Original', 'Original']);
+  assert.deepEqual(Array.from(parsed, event => event.getFirstPropertyValue('summary')).sort(),
+    todayOccurrenceIsFuture ? ['Moved', 'Original', 'Original'] : ['Moved', 'Original']);
   assert.equal(parsed.find(event => event.getFirstPropertyValue('summary') === 'Moved').getFirstPropertyValue('dtstart').hour, 12);
   assert.match(parsed.find(event => event.getFirstPropertyValue('summary') === 'Moved').toString(), /DTSTART:.*Z/);
   assert.ok(s.icsEventsIds.every(id => id.startsWith('ics-instance:')));
-  assert.equal(new Set(s.icsEventsIds).size, 3);
+  assert.equal(new Set(s.icsEventsIds).size, parsed.length);
   const again = s.parseResponses([{source: 'feed.ics', content: feed}]);
   assert.deepEqual(Array.from(again, event => event.getFirstPropertyValue('uid')), Array.from(parsed, event => event.getFirstPropertyValue('uid')));
 });

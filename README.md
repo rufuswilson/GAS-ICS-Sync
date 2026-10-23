@@ -17,7 +17,9 @@ var sourceCalendars = [
 
 The previous array format remains supported, including mixed configurations: `[source, target]` or `[source, target, colour]`.
 
-Internally, `condenseCalendarMap` groups entries as `{target, sources}`. Each source is an object with named fields. Object mappings can override these settings for that source: `defaultColor`, `addAlerts`, `addOrganizerToTitle`, `descriptionAsTitles`, `addCalToTitle`, `addAttendees`, `defaultAllDayReminder`, `overrideVisibility`, `recurringInstanceWindowDays`, `addEventsToCalendar`, `modifyExistingEvents`, `removeEventsFromCalendar`, and `removePastEventsFromCalendar`. Unspecified settings use their global `Config.gs` values; an explicit `false` overrides a global `true`. For example:
+`target` names the target calendar. For a renamed target or duplicate display names, add `targetId` with its exact Google Calendar ID. The script fails if that ID is missing or not writable. Use the same `targetId` on every mapping sharing a target.
+
+Internally, `condenseCalendarMap` groups entries as `{target, targetId, sources}`. Each source is an object with named fields. Object mappings can override these settings for that source: `defaultColor`, `addAlerts`, `addOrganizerToTitle`, `descriptionAsTitles`, `addCalToTitle`, `addAttendees`, `defaultAllDayReminder`, `overrideVisibility`, `recurringInstanceWindowDays`, `addEventsToCalendar`, `modifyExistingEvents`, `removeEventsFromCalendar`, `removePastEventsFromCalendar`, `skipIfEmptyFeed`, `pastEventWindowDays`, `titlePrefix`, `titlePrefixAllDayOnly`, `mapMicrosoftTentativeToFree`, `fallbackReminderMinutes`, and `decodeOutlookSafeLinks`. Unspecified settings use their global `Config.gs` values; an explicit `false` overrides a global `true`. For example:
 
 ```javascript
 {source: "https://example.com/events.ics", target: "Target",
@@ -26,6 +28,12 @@ Internally, `condenseCalendarMap` groups entries as `{target, sources}`. Each so
 ```
 
 `colour` takes precedence over both the source's `defaultColor` and the global `defaultColor`. Copied events store a hash of the configured source address so cleanup can apply that source's removal settings without storing the address itself. Existing events are tagged when they still match one unambiguous source event. Older events that no longer match a source are preserved because their source cannot be identified safely. Task cleanup remains controlled by the global setting.
+
+`skipIfEmptyFeed` defaults to `true`. If a successfully fetched ICS or Google Calendar source contains no active events (including a feed with only cancelled events), sync marks the run failed and preserves existing target events while continuing to process other sources. Set it to `false` on a source only when an intentionally empty source should clear its target events. This checks the source before event filters, so a filter that excludes every event does not count as an empty feed.
+
+`pastEventWindowDays` defaults to `null` (all history). Set a non-negative number of days globally or per source to skip older, completed events while retaining recurring series. Target events older than that source's window are preserved during cleanup. The source is still fetched in full before this filter is applied. `maxCleanupDeletesPerRun` defaults to `100`; cleanup stores a cursor per target and resumes deletion in later sync runs. A failed deletion is reported and does not appear as a successful removal in the email summary.
+
+ICS feeds are decoded as UTF-8 and require valid HTTPS certificates. VFREEBUSY-only feeds create one opaque “Busy” event per non-free interval; VEVENTs take precedence in mixed feeds. `titlePrefix` adds text before copied titles, and `titlePrefixAllDayOnly: true` limits it to all-day events. `mapMicrosoftTentativeToFree: true` maps Microsoft's tentative busy marker to free unless `TRANSP` is explicit. `fallbackReminderMinutes` adds a popup when `addAlerts: "yes"` finds no usable alarm; `defaultAllDayReminder` takes precedence over calendar defaults for all-day events. `decodeOutlookSafeLinks: true` replaces recognized Outlook Safe Links in ICS descriptions with their target URL.
 
 ### Updates from this fork
 
@@ -57,13 +65,13 @@ When a future date filter applies to an ICS or Google Calendar source, its recur
 
 To inspect script-created events in one configured target, call `clearGASEvents("Target")`. This only previews and returns a count. To remove them, call `clearGASEvents("Target", false)` explicitly. Only events marked `fromGAS=true` are selected. Keep private ICS URLs and personal account mappings in your own script configuration rather than a shared repository.
 
-[If you want to use this, please copy the script from here](https://script.google.com/d/1BOk8MDLbLaHh6SwG1M1tsgNXjkcC-79LE0QoipRuTDxbO3fMVvqoROQD/edit?newcopy=true)
+### Install or update manually
 
-**To make a copy in the new Google Apps Script interface:**
-1. Go to the project overview icon on the left (looks like this: ⓘ)
-2. Click the "copy" icon on the top right (looks like two files on top of each other)
+Use [this fork's source files](https://github.com/rufuswilson/GAS-ICS-Sync), including `appsscript.json`. Create a standalone Apps Script project, copy the `.gs` files and manifest into it, then edit `Config.gs` with your own calendar mappings. Enable the Calendar advanced service shown in the manifest; enable Tasks too if you use task syncing. Run `install()` once in the editor to create the sync trigger and grant the requested permissions. Test with a non-critical target calendar before using an existing one.
 
-**NOTE:** If too many people are accessing the file at the same time, Google may lock you out. You can follow these instructions to set up the script: https://github.com/derekantrican/GAS-ICS-Sync/wiki/Setting-up-the-script-manually
+For a command-line installation, install [clasp](https://github.com/google/clasp), run `clasp login`, create an Apps Script project in the browser, then run `clasp clone SCRIPT_ID` in a new directory. Copy only this fork's `.gs` files and `appsscript.json` into that cloned directory, set your private `Config.gs`, and run `clasp push`. Keep the cloned directory private because it contains feed URLs and account settings. Run `install()` from the Apps Script editor after the push.
+
+Before a manual update, save copies of your private `Config.gs` and `Filters.gs`, check the selected fork release or commit, and replace only the maintained script files. Review manifest scope changes, run `PreviewUpdate()` if the installed updater supports it, and reauthorize from the editor if prompted. Verify one sync and its execution log before relying on the trigger again. If an account password change or revoked grant leaves the trigger reporting authorization errors, open the project as the trigger owner, run `install()` manually, accept the requested scopes, and run a test sync. If Google still rejects the grant, remove the old project authorization in your Google account's third-party access settings and authorize the script again.
 
 ---------------
 
@@ -75,6 +83,8 @@ To inspect script-created events in one configured target, call `clearGASEvents(
 ----------------
 
 ### Contributing
+
+Run `node --test tests/*.test.js` from `rufuswilson/` before submitting changes. The suite includes a syntax and whitespace check for maintained Apps Script files and runs in GitHub Actions.
 
 If you would like to contribute to this repository, please fork the repository, make your changes, and start a pull request. If your pull request is approved, I will add you as a contributer directly to the repository
 

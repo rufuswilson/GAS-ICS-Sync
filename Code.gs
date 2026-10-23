@@ -215,7 +215,7 @@ function startSync(){
     var sourceFetchFailed = responses.failed === true;
 
     //------------------------ Get target calendar information------------------------
-    var targetCalendar = setupTargetCalendar(targetCalendarName);
+    var targetCalendar = setupTargetCalendar(targetCalendarName, calendar.targetId);
     targetCalendarId = targetCalendar.id;
     Logger.log("Working on calendar: " + targetCalendarId);
 
@@ -226,7 +226,7 @@ function startSync(){
             return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500});
         }, defaultMaxRetries);
       if (!eventList) throw new Error("Could not list target events for " + targetCalendarName);
-      calendarEvents = calendarEvents.concat(eventList.items || []);
+      calendarEvents = calendarEvents.concat((eventList.items || []).filter(function(event){ return event.status !== "cancelled"; }));
       //loop until we received all events
       while (eventList.nextPageToken){
         eventList = callWithBackoff(function(){
@@ -234,7 +234,7 @@ function startSync(){
         }, defaultMaxRetries);
 
         if (!eventList) throw new Error("Could not list all target events for " + targetCalendarName);
-        calendarEvents = calendarEvents.concat(eventList.items || []);
+        calendarEvents = calendarEvents.concat((eventList.items || []).filter(function(event){ return event.status !== "cancelled"; }));
       }
       Logger.log("Fetched " + calendarEvents.length + " existing events from " + targetCalendarName);
       for (var i = 0; i < calendarEvents.length; i++){
