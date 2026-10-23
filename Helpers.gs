@@ -1972,7 +1972,7 @@ function AutoUpdate(dryRun){
 
 function autoUpdateGithubJson_(url){
   var headers = {Accept: "application/vnd.github+json", "User-Agent": "GAS-ICS-Sync-AutoUpdate"};
-  var token = PropertiesService.getScriptProperties().getProperty("GITHUB_TOKEN");
+  var token = String(PropertiesService.getScriptProperties().getProperty("GITHUB_TOKEN") || "").trim();
   if (token) headers.Authorization = "Bearer " + token;
   var response = UrlFetchApp.fetch(url, {muteHttpExceptions: true,
     headers: headers});
@@ -1988,6 +1988,17 @@ function autoUpdateGithubJson_(url){
 }
 
 function autoUpdateRawFile_(repo, ref, name){
+  // Raw URLs cannot reliably access private repositories. Use the authenticated
+  // Contents API when a token is configured, at the same pinned ref as the listing.
+  if (String(PropertiesService.getScriptProperties().getProperty("GITHUB_TOKEN") || "").trim()){
+    var apiUrl = "https://api.github.com/repos/" + repo + "/contents/" +
+      encodeURIComponent(name) + "?ref=" + encodeURIComponent(ref);
+    var file = autoUpdateGithubJson_(apiUrl);
+    if (file.type !== "file" || file.encoding !== "base64" || typeof file.content !== "string")
+      throw new Error("GitHub returned no base64 content for " + name);
+    return Utilities.newBlob(Utilities.base64Decode(file.content.replace(/\s/g, "")))
+      .getDataAsString("UTF-8");
+  }
   var url = "https://raw.githubusercontent.com/" + repo + "/" +
     encodeURIComponent(ref) + "/" + encodeURIComponent(name);
   var response = UrlFetchApp.fetch(url, {muteHttpExceptions: true});

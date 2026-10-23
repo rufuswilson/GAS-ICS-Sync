@@ -25,6 +25,7 @@ function setup(options = {}) {
   const writes = [];
   const emails = [];
   const properties = new Map();
+  if (options.token) properties.set('GITHUB_TOKEN', options.token);
   const currentFiles = [
     {name: 'Code', type: 'SERVER_JS', source: 'old code'},
     {name: 'Config', type: 'SERVER_JS', source: 'private config'},
@@ -62,6 +63,10 @@ function setup(options = {}) {
         return response(200, {commit: {sha: 'a'.repeat(40)}});
       if (url.startsWith(repoApi + '/contents?ref='))
         return response(200, Object.keys(remoteSources).map(name => ({name, type: 'file'})));
+      const contents = url.match(/^https:\/\/api\.github\.com\/repos\/rufuswilson\/GAS-ICS-Sync\/contents\/([^?]+)\?ref=([^&]+)$/);
+      if (contents && remoteSources[decodeURIComponent(contents[1])] !== undefined)
+        return response(200, {type: 'file', encoding: 'base64',
+          content: Buffer.from(remoteSources[decodeURIComponent(contents[1])], 'utf8').toString('base64')});
       const raw = url.match(/^https:\/\/raw\.githubusercontent\.com\/rufuswilson\/GAS-ICS-Sync\/([^/]+)\/([^/]+)$/);
       if (raw && remoteSources[decodeURIComponent(raw[2])] !== undefined)
         return {getResponseCode() { return 200; }, getContentText() {
@@ -106,6 +111,15 @@ test('email mode sends one notice and does not write project content', () => {
   assert.equal(s.emails.length, 1);
   assert.equal(s.writes.length, 0);
   assert.ok(s.emails[0][2].includes(latest.html_url));
+});
+
+test('configured GitHub token authenticates source downloads too', () => {
+  const s = setup({token: 'test-token'});
+  s.context.AutoUpdate(true);
+  const githubCalls = s.calls.filter(call => call.url.startsWith(repoApi));
+  assert.equal(githubCalls.length, 7);
+  assert.ok(githubCalls.every(call => call.params.headers.Authorization === 'Bearer test-token'));
+  assert.equal(s.calls.filter(call => call.url.startsWith('https://raw.githubusercontent.com/')).length, 0);
 });
 
 test('bleeding-edge pins a commit and rejects a release missing the updater', () => {
