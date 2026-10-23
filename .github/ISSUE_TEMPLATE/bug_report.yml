@@ -55,7 +55,7 @@ body:
           
           * Screenshots
           * An input ics string that can reproduce the problem (you can remove sensitive information with https://derekantrican.com/icssanitizer)
-          * Your settings (approx lines 34-50 of Code.gs. eg `var howFrequent = ....` and the following lines) 
+          * Your settings (in Config.gs, eg `var howFrequent = ....` and the following lines)
   - type: textarea
     attributes:
       label: Additional information & file uploads

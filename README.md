@@ -4,6 +4,49 @@
 
 This is a standalone script (that consists of multiple files). The purpose is to sync ics/ical calendars to Google Calendar. Google Calendar *can* already do this, but updates only happen once every 12 or even 24 hrs. This script can be run much more frequently.
 
+### Source options in this fork
+
+Edit `Config.gs` to set `sourceCalendars` and the sync options. Define `sourceCalendars` as a list of objects with `source`, `target`, and optional `colour`. `source` can be an ICS URL, a Google Calendar ID, or a subscribed calendar name. Use an ID when names are ambiguous. The per-source colour works with either source type:
+
+```javascript
+var sourceCalendars = [
+  {source: "https://example.com/events.ics", target: "Target", colour: "11"},
+  {source: "source-calendar-id@group.calendar.google.com", target: "Target"}
+];
+```
+
+The previous array format remains supported, including mixed configurations: `[source, target]` or `[source, target, colour]`.
+
+Internally, `condenseCalendarMap` groups entries as `{target, sources}`. Each source is an object with named fields, and additional fields from object mappings are retained for future per-source settings. At present, `colour` is the per-source setting applied during sync.
+
+### Updates from this fork
+
+`install()` checks GitHub once per day using `AutoUpdate()` in `Helpers.gs`. Set the update options in your private `Config.gs`:
+
+```javascript
+var autoUpdateRepository = "rufuswilson/GAS-ICS-Sync";
+var autoUpdateMode = "auto";          // "auto" installs; "email" only notifies
+var autoUpdateChannel = "release";    // "release" or "bleeding-edge"
+var autoUpdateBranch = "master";      // branch used for bleeding-edge
+var email = "you@example.com";       // required for email mode
+```
+
+Release mode follows the latest published GitHub release. Bleeding edge follows the latest commit on the selected branch. Both fetch code at one fixed tag or commit. `Config.gs` and `filters.gs` in your Apps Script project are retained. Run `PreviewUpdate()` from the editor to preview the selected version and managed files without installing or sending email. `AutoUpdate()` checks and acts on the configured mode; running `install()` recreates the daily update trigger. An existing `checkForUpdate` trigger replaces itself with an `AutoUpdate` trigger on its next run.
+
+Before enabling automatic installation, publish this updated code to the fork and create a release if using release mode. The selected version must contain `AutoUpdate`; older versions are rejected so they cannot remove the updater. Release mode has nothing to install until the fork has a published release. For automatic installation, the Apps Script API must be enabled in the script's Google Cloud project and access to Apps Script projects must be enabled at [Apps Script settings](https://script.google.com/home/usersettings). After adding the `script.projects` scope, run `PreviewUpdate()` manually in the editor to grant the new permission before relying on the daily trigger. If you only want email notices, set `autoUpdateMode = "email"` and provide `email`.
+
+Set `defaultColor` in `Config.gs` to a `CalendarApp.EventColor` value (for example, `CalendarApp.EventColor.RED`) to colour events from sources without an explicit `colour`. A source's `colour` takes precedence. Leave `defaultColor = true` to retain source and calendar colours.
+
+Google Calendar sources copy ordinary and recurring events and their recurrence overrides. The script skips removal from a target when any of its sources cannot be read.
+
+### Filters and cleanup
+
+Configure rules in `filters.gs`. Date filters, attendee email filters, and the `allDay` filter work with both ICS and Google Calendar sources. Add an optional `source` to restrict a rule to one source; use the same URL, name, or ID as in `sourceCalendars`. An attendee rule matches if any attendee has the listed email address, ignoring case.
+
+When a future date filter applies to an ICS or Google Calendar source, its recurring series are copied as individual occurrences within `recurringInstanceWindowDays` days of the filter cutoff (default 180). Each occurrence keeps a stable source key based on its original scheduled start, so a moved occurrence updates the same target event. Cancelled or filtered occurrences are omitted and removed from the target when `removeEventsFromCalendar` is enabled. Existing copied recurring series are also removed during this transition when both `removeEventsFromCalendar` and `removePastEventsFromCalendar` are enabled. Series without a future date filter continue to sync as recurring series.
+
+To inspect script-created events in one configured target, call `clearGASEvents("Target")`. This only previews and returns a count. To remove them, call `clearGASEvents("Target", false)` explicitly. Only events marked `fromGAS=true` are selected. Keep private ICS URLs and personal account mappings in your own script configuration rather than a shared repository.
+
 [If you want to use this, please copy the script from here](https://script.google.com/d/1BOk8MDLbLaHh6SwG1M1tsgNXjkcC-79LE0QoipRuTDxbO3fMVvqoROQD/edit?newcopy=true)
 
 **To make a copy in the new Google Apps Script interface:**

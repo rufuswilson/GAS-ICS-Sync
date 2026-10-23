@@ -86,27 +86,42 @@ String.prototype.includes = function(phrase){
 /**
  * Takes an array of ICS calendars and target Google calendars and combines them
  *
- * @param {Array.string} calendarMap - User-defined calendar map
- * @return {Array.string} Condensed calendar map
+ * @param {Array} calendarMap - Entries with source, target and optional settings,
+ *   or legacy [source, target, colour] entries
+ * @return {Array} Groups of {target, sources}, with each source's settings retained
  */
 function condenseCalendarMap(calendarMap){
   var result = [];
   for (var mapping of calendarMap){
+    var target = Array.isArray(mapping) ? mapping[1] : mapping.target;
+    var source = Array.isArray(mapping) ? {source: mapping[0], colour: mapping[2]} : Object.assign({}, mapping);
+    delete source.target;
     var index = -1;
     for (var i = 0; i < result.length; i++){
-      if (result[i][0] == mapping[1]){
+      if (result[i].target == target){
         index = i;
         break;
       }
     }
 
     if (index > -1)
-      result[index][1].push([mapping[0],mapping[2]]);
+      result[index].sources.push(source);
     else
-      result.push([ mapping[1], [[mapping[0],mapping[2]]] ]);
+      result.push({target: target, sources: [source]});
   }
 
   return result;
+}
+
+/** A source colour takes precedence over the configured default. */
+function configuredEventColor(sourceColor){
+  var selected = sourceColor !== undefined ? sourceColor : (defaultColor === true ? undefined : defaultColor);
+  if (selected === undefined) return undefined;
+  var color = String(selected);
+  if (Object.prototype.hasOwnProperty.call(CalendarApp.EventColor, color)) return CalendarApp.EventColor[color];
+  if (Object.values(CalendarApp.EventColor).includes(color)) return color;
+  Logger.log("Ignoring unsupported event colour: " + color);
+  return undefined;
 }
 
 /**
@@ -115,7 +130,7 @@ function condenseCalendarMap(calendarMap){
 function deleteAllTriggers(){
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++){
-    if (["startSync","install","main","checkForUpdate"].includes(triggers[i].getHandlerFunction())){
+    if (["startSync","install","main","checkForUpdate","AutoUpdate"].includes(triggers[i].getHandlerFunction())){
       ScriptApp.deleteTrigger(triggers[i]);
     }
   }
@@ -124,18 +139,33 @@ function deleteAllTriggers(){
 /**
  * Gets the ressource from the specified URLs.
  *
- * @param {Array.string} sourceCalendarURLs - Array with URLs to fetch
- * @return {Array.string} The ressources fetched from the specified URLs
+ * @param {Array} sourceCalendarURLs - Source entries with optional settings
+ * @return {Array} The resources fetched from the specified sources
  */
 function fetchSourceCalendars(sourceCalendarURLs){
-  var result = []
+  var result = [];
   for (var source of sourceCalendarURLs){
-    var url = source[0].replace("webcal://", "https://");
-    var colorId = source[1];
+    var url = source.source.replace(/^webcal:\/\//, "https://");
+    // iCal URLs can contain a private access token. Keep it out of logs and errors.
+    var sourceLabel = /^https?:\/\//i.test(url) ?
+      url.replace(/^(https?:\/\/[^/]+).*$/, "$1/[redacted]") : url;
+    var colorId = source.colour;
 
     try {
+      if (!/^https?:\/\//i.test(url)) {
+        var sourceCalendar = findSourceGoogleCalendar(url);
+        if (!sourceCalendar) throw new Error("Google Calendar source not found: " + url);
+        result.push({kind: "google", calendar: sourceCalendar, colorId: colorId, source: source.source, settings: source});
+        continue;
+      }
+      var fetched = false;
       callWithBackoff(function() {
-        var urlResponse = UrlFetchApp.fetch(url, { 'validateHttpsCertificates' : false, 'muteHttpExceptions' : true });
+        var urlResponse;
+        try {
+          urlResponse = UrlFetchApp.fetch(url, { 'validateHttpsCertificates' : false, 'muteHttpExceptions' : true });
+        } catch (fetchError) {
+          throw new Error(String(fetchError).split(url).join(sourceLabel));
+        }
         if (urlResponse.getResponseCode() == 200){
           var icsContent = urlResponse.getContentText()
           const icsRegex = RegExp("(BEGIN:VCALENDAR.*?END:VCALENDAR)", "s")
@@ -152,26 +182,46 @@ function fetchSourceCalendars(sourceCalendarURLs){
             }
             urlContent = icsRegex.exec(icsContent)
             if (urlContent == null){
-              Logger.log("[ERROR] Incorrect ics/ical URL: " + url)
+              Logger.log("[ERROR] Incorrect ics/ical URL: " + sourceLabel)
               reportOverallFailure = true;
-              return
+              throw new Error("Invalid ICS source: " + sourceLabel);
             }
-            Logger.log("[WARNING] Microsoft is incorrectly formatting ics/ical at: " + url)
+            Logger.log("[WARNING] Microsoft is incorrectly formatting ics/ical at: " + sourceLabel)
           }
-          result.push([urlContent[0], colorId]);
+          result.push({kind: "ics", content: urlContent[0], colorId: colorId, source: source.source, settings: source});
+          fetched = true;
           return;
         }
         else{ //Throw here to make callWithBackoff run again
-          throw "Error: Encountered HTTP error " + urlResponse.getResponseCode() + " when accessing " + url;
+          throw "Error: Encountered HTTP error " + urlResponse.getResponseCode() + " when accessing " + sourceLabel;
         }
       }, defaultMaxRetries);
+      if (!fetched) throw new Error("Could not fetch ICS source: " + sourceLabel);
     }
     catch (e) {
+      Logger.log("Could not fetch source " + sourceLabel + ": " + String(e).split(url).join(sourceLabel));
       reportOverallFailure = true;
+      result.failed = true;
     }
   }
 
   return result;
+}
+
+function findSourceGoogleCalendar(nameOrId){
+  var pageToken;
+  do {
+    var options = {maxResults: 250, showHidden: true};
+    if (pageToken) options.pageToken = pageToken;
+    var page = callWithBackoff(function(){ return Calendar.CalendarList.list(options); }, defaultMaxRetries);
+    if (!page) throw new Error("Could not list Google Calendars");
+    var match = (page.items || []).filter(function(calendar){
+      return calendar.id === nameOrId || calendar.summary === nameOrId || calendar.summaryOverride === nameOrId;
+    })[0];
+    if (match) return match;
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return null;
 }
 
 /**
@@ -209,9 +259,44 @@ function setupTargetCalendar(targetCalendarName){
  */
 function parseResponses(responses){
   var result = [];
+  var nativeResults = [];
   for (var itm of responses){
-    var resp = itm[0];
-    var colorId = itm[1];
+    if (itm.kind === "google") {
+      try {
+        if (itm.calendar.id === targetCalendarId) throw new Error("Source and target are the same Google Calendar");
+        var nativeEvents = listSourceGoogleEvents(itm.calendar.id);
+        var sourceName = itm.source || itm.calendar.id;
+        var futureFilters = futureDateFilters(sourceName, itm.calendar.id);
+        var windowed = futureFilters.length > 0;
+        var occurrenceItems = windowed ? materializeNativeSeries(nativeEvents, itm, futureFilters) : [];
+        if (windowed) {
+          nativeEvents = nativeEvents.filter(function(event){
+            return !event.recurrence && !event.recurringEventId;
+          });
+        }
+        nativeEvents = filterNativeEvents(nativeEvents, sourceName, itm.calendar.id);
+        nativeEvents.forEach(function(event){
+          if ((event.attendees || []).some(function(attendee){ return attendee.self && attendee.responseStatus === "declined"; })) return;
+          if (event.recurringEventId && event.originalStartTime) {
+            nativeResults.push({nativeEvent: event, source: itm});
+          } else if (event.status !== "cancelled") {
+            nativeResults.push({nativeEvent: event, source: itm});
+            icsEventsIds.push(nativeEventKey(itm.calendar.id, event.id));
+          }
+        });
+        occurrenceItems.forEach(function(item){
+          nativeResults.push(item);
+          icsEventsIds.push(item.sourceKey);
+        });
+      } catch (e) {
+        Logger.log("Could not read Google Calendar " + itm.calendar.id + ": " + e);
+        reportOverallFailure = true;
+        responses.failed = true;
+      }
+      continue;
+    }
+    var resp = itm.content;
+    var colorId = itm.colorId;
     var jcalData = ICAL.parse(resp);
     var component = new ICAL.Component(jcalData);
 
@@ -222,14 +307,17 @@ function parseResponses(responses){
     }
 
     var allEvents = component.getAllSubcomponents("vevent");
-    if (colorId != undefined)
-      allEvents.forEach(function(event){event.addPropertyWithValue("color", colorId);});
+    var configuredColor = configuredEventColor(colorId);
+    if (configuredColor !== undefined)
+      allEvents.forEach(function(event){event.updatePropertyWithValue("color", configuredColor);});
 
     var calName = component.getFirstPropertyValue("x-wr-calname") || component.getFirstPropertyValue("name");
     if (calName != null)
       allEvents.forEach(function(event){event.addPropertyWithValue("parentCal", calName); });
 
-    result = [].concat(allEvents, result);
+    var futureFilters = futureDateFilters(itm.source);
+    var icsEvents = futureFilters.length ? materializeICSSeries(allEvents, itm.source, futureFilters) : allEvents;
+    result = [].concat(filterICSEvents(icsEvents, itm.source), result);
   }
 
   //No need to process cancelled events as they will be added to gcal's trash anyway
@@ -240,8 +328,6 @@ function parseResponses(responses){
       return true;
     }
   });
-
-  result = filterResults(result);
 
   result.forEach(function(event){
     if (!event.hasProperty('uid')){
@@ -269,7 +355,168 @@ function parseResponses(responses){
     }
   });
 
+  return result.concat(nativeResults);
+}
+
+function nativeEventKey(calendarId, eventId){
+  return "gcal:" + calendarId + ":" + eventId;
+}
+
+function nativeInstanceKey(calendarId, seriesId, originalStartTime){
+  return "gcal-instance:" + calendarId + ":" + seriesId + ":" +
+    (originalStartTime.dateTime || originalStartTime.date);
+}
+
+function futureDateFilters(source, calendarId){
+  return filters.filter(function(filter){
+    var parameter = filter.parameter.toLowerCase();
+    return filterAppliesToSource(filter, source, calendarId) &&
+      (parameter === "dtstart" || parameter === "dtend") &&
+      ((filter.type === "include" && filter.comparison === ">") ||
+       (filter.type === "exclude" && filter.comparison === "<"));
+  });
+}
+
+/** Copy each occurrence of a future-filtered ICS series as a standalone event. */
+function materializeICSSeries(events, source, futureFilters){
+  if (!Number.isInteger(recurringInstanceWindowDays) || recurringInstanceWindowDays < 1)
+    throw new Error("recurringInstanceWindowDays must be a positive integer");
+  var midnight = new Date();
+  midnight.setUTCHours(0, 0, 0, 0);
+  var startOffset = Math.min.apply(null, futureFilters.map(function(filter){ return filter.offset || 0; }));
+  var windowStart = midnight.getTime() + startOffset * 86400000;
+  var windowEnd = windowStart + recurringInstanceWindowDays * 86400000;
+  var sourceDigest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, source, Utilities.Charset.UTF_8)
+    .map(function(byte){ return (byte & 255).toString(16).padStart(2, "0"); }).join("");
+  var exceptions = {};
+  events.forEach(function(component){
+    if (!component.hasProperty("recurrence-id")) return;
+    var uid = component.getFirstPropertyValue("uid");
+    if (!exceptions[uid]) exceptions[uid] = [];
+    exceptions[uid].push(component);
+  });
+  var result = [];
+  events.forEach(function(component){
+    if (component.hasProperty("recurrence-id")) return;
+    if (!component.hasProperty("rrule") && !component.hasProperty("rdate")) {
+      result.push(component);
+      return;
+    }
+    var uid = component.getFirstPropertyValue("uid");
+    if (!uid) {
+      uid = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, component.toString(), Utilities.Charset.UTF_8).toString();
+      component.updatePropertyWithValue("uid", uid);
+    }
+    // ICAL.Event otherwise auto-attaches every exception in the VCALENDAR,
+    // including exceptions belonging to other series with the same start time.
+    var series = new ICAL.Event(component, {exceptions: [], strictExceptions: true});
+    (exceptions[uid] || []).forEach(function(exception){ series.relateException(exception); });
+    var iterationEnd = windowEnd;
+    (exceptions[uid] || []).forEach(function(exception){
+      if (!exception.hasProperty("dtstart")) return;
+      var exceptionStart = new ICAL.Event(exception).startDate.toJSDate().getTime();
+      var original = exception.getFirstPropertyValue("recurrence-id").toJSDate().getTime();
+      if (exceptionStart < windowEnd && original >= windowEnd)
+        iterationEnd = Math.max(iterationEnd, original + 1);
+    });
+    var iterator = series.iterator();
+    var originalStart;
+    var count = 0;
+    while ((originalStart = iterator.next()) != null) {
+      if (++count > 100000) throw new Error("ICS recurrence expansion exceeded 100000 instances for " + uid);
+      // A moved exception may enter the window even if its original start is before it.
+      if (originalStart.toJSDate().getTime() >= iterationEnd) break;
+      var details = series.getOccurrenceDetails(originalStart);
+      if (details.startDate.toJSDate().getTime() >= windowEnd ||
+          details.endDate.toJSDate().getTime() <= windowStart) continue;
+      if (String(details.item.component.getFirstPropertyValue("status") || "").toLowerCase() === "cancelled") continue;
+      result.push(makeICSInstance(component, details, sourceDigest, uid));
+    }
+  });
   return result;
+}
+
+function makeICSInstance(parent, details, sourceDigest, uid){
+  var component = new ICAL.Component(JSON.parse(JSON.stringify(parent.toJSON())));
+  if (details.item.component !== parent) {
+    details.item.component.getAllProperties().forEach(function(property){
+      var name = property.name;
+      if (name === "uid" || name === "recurrence-id" || name === "rrule" || name === "rdate" || name === "exdate") return;
+      component.removeAllProperties(name);
+      component.addProperty(new ICAL.Property(JSON.parse(JSON.stringify(property.toJSON()))));
+    });
+  }
+  var startProperty = component.getFirstProperty("dtstart");
+  var endProperty = component.getFirstProperty("dtend") || startProperty;
+  ["rrule", "rdate", "exdate", "recurrence-id", "duration", "dtstart", "dtend"].forEach(function(name){
+    component.removeAllProperties(name);
+  });
+  [["dtstart", details.startDate, startProperty], ["dtend", details.endDate, endProperty]].forEach(function(item){
+    var property = item[2] ? new ICAL.Property(JSON.parse(JSON.stringify(item[2].toJSON()))) : new ICAL.Property(item[0]);
+    property.jCal[0] = item[0];
+    property.setValue(item[1]);
+    component.addProperty(property);
+  });
+  component.updatePropertyWithValue("uid", "ics-instance:" + sourceDigest + ":" + uid + ":" + details.recurrenceId.toString());
+  return component;
+}
+
+function materializeNativeSeries(events, source, futureFilters){
+  if (!Number.isInteger(recurringInstanceWindowDays) || recurringInstanceWindowDays < 1)
+    throw new Error("recurringInstanceWindowDays must be a positive integer");
+  var midnight = new Date();
+  midnight.setUTCHours(0, 0, 0, 0);
+  var startOffset = Math.min.apply(null, futureFilters.map(function(filter){ return filter.offset || 0; }));
+  var timeMin = new Date(midnight.getTime() + startOffset * 86400000);
+  var timeMax = new Date(timeMin.getTime() + recurringInstanceWindowDays * 86400000);
+  var result = [];
+  events.filter(function(event){ return event.recurrence && event.status !== "cancelled"; }).forEach(function(series){
+    var options = {maxResults: 2500, showDeleted: true,
+      timeMin: timeMin.toISOString(), timeMax: timeMax.toISOString()};
+    var pageToken;
+    do {
+      if (pageToken) options.pageToken = pageToken;
+      var page = callWithBackoff(function(){
+        return Calendar.Events.instances(source.calendar.id, series.id, options);
+      }, defaultMaxRetries);
+      if (!page) throw new Error("Could not list source recurrence instances for " + series.id);
+      (page.items || []).forEach(function(instance){
+        if (instance.status !== "cancelled") {
+          if (!instance.start || !instance.end || !instance.originalStartTime)
+            throw new Error("Incomplete source recurrence instance for " + series.id);
+          var occurrence = Object.assign({}, instance);
+          ["summary", "description", "location", "attendees", "organizer", "visibility",
+            "transparency", "reminders", "source", "colorId"].forEach(function(field){
+            if (occurrence[field] === undefined && series[field] !== undefined) occurrence[field] = series[field];
+          });
+          result.push({nativeEvent: occurrence, source: source, materialized: true,
+            sourceKey: nativeInstanceKey(source.calendar.id, series.id, instance.originalStartTime)});
+        }
+      });
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+  });
+  var filtered = filterNativeEvents(result.map(function(item){ return item.nativeEvent; }),
+    source.source || source.calendar.id, source.calendar.id, true);
+  var keep = {};
+  filtered.forEach(function(event){ keep[event.id] = true; });
+  return result.filter(function(item){ return keep[item.nativeEvent.id]; });
+}
+
+function listSourceGoogleEvents(calendarId){
+  var events = [];
+  var pageToken;
+  do {
+    var options = {maxResults: 2500, showDeleted: true, singleEvents: false};
+    if (pageToken) options.pageToken = pageToken;
+    var page = callWithBackoff(function(){ return Calendar.Events.list(calendarId, options); }, defaultMaxRetries);
+    if (!page) throw new Error("Could not list source events");
+    events = events.concat(page.items || []);
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return events.filter(function(event){
+    return !(event.extendedProperties && event.extendedProperties.private && event.extendedProperties.private.fromGAS === "true");
+  });
 }
 
 /**
@@ -278,25 +525,56 @@ function parseResponses(responses){
  * @param {Array.ICALComponent} Array with all events from the source calendars
  * @return {Array.ICALComponent} Array with filtered events
  */
-function filterResults(events){
-  Logger.log(`Applying ${filters.length} filters on ${events.length} events.`);
+function filterAppliesToSource(filter, source, calendarId){
+  return !filter.source || filter.source === source || filter.source === calendarId;
+}
+
+function matchesTextFilter(filter, values){
+  var criteria = filter.criterias || [];
+  var comparison = filter.comparison || "equals";
+  return values.some(function(value){
+    return criteria.some(function(criterion){
+      var actual = String(value);
+      var expected = String(criterion);
+      if (comparison === "equals") return actual.toLowerCase() === expected.toLowerCase();
+      if (comparison === "begins with") return actual.toLowerCase().startsWith(expected.toLowerCase());
+      if (comparison === "contains") return actual.toLowerCase().includes(expected.toLowerCase());
+      if (comparison === "regex") return new RegExp(expected, "i").test(actual);
+      throw new Error("Unsupported text filter comparison: " + comparison);
+    });
+  });
+}
+
+function excludeICSException(events, event){
+  if (!event.hasProperty('recurrence-id')) return;
+  var uid = event.getFirstPropertyValue('uid');
+  if (!uid) return;
+  var parent = events.find(function(candidate){
+    return candidate.getFirstPropertyValue('uid') === uid && !candidate.hasProperty('recurrence-id');
+  });
+  if (parent) parent.addPropertyWithValue('exdate', event.getFirstPropertyValue('recurrence-id'));
+}
+
+function filterICSEvents(events, source){
+  Logger.log(`Applying ${filters.length} filters on ${events.length} ICS events.`);
 
   for (var filter of filters){
-    filter.parameter = filter.parameter.toLowerCase();
+    if (!filterAppliesToSource(filter, source)) continue;
+    var parameter = filter.parameter.toLowerCase();
     events = events.filter(function(event){
       try{
-        if (["dtstart", "dtend"].includes(filter.parameter)){
-          let referenceDate = new ICAL.Time.fromJSDate(new Date(), true).adjust(filter.offset,0,0,0);
+        if (["dtstart", "dtend"].includes(parameter)){
+          let referenceDate = new ICAL.Time.fromJSDate(new Date(), true).adjust(filter.offset || 0,0,0,0);
           if (event.hasProperty('rrule') || event.hasProperty('rdate')) {
             if ((filter.comparison === ">" && filter.type === "exclude")||(filter.comparison === "<" && filter.type === "include")) {
-              event = modifyRecurrenceEnd(event, referenceDate, filter.parameter);
+              event = modifyICSRecurrenceEnd(event, referenceDate, parameter);
             } else if ((filter.comparison === "<" && filter.type === "exclude")||(filter.comparison === ">" && filter.type === "include")) {
-              event = modifyRecurrenceStart(event, referenceDate, filter.parameter);
+              event = modifyICSRecurrenceStart(event, referenceDate, parameter);
             }
             return event !== null;
           }
           else{
-            let eventTime = new ICAL.Time.fromString(event.getFirstPropertyValue(filter.parameter).toString(), event.getFirstProperty(filter.parameter));
+            let eventTime = new ICAL.Time.fromString(event.getFirstPropertyValue(parameter).toString(), event.getFirstProperty(parameter));
             switch (filter.comparison){
               case ">":
                 return ((eventTime.compare(referenceDate) > 0) ^ (filter.type == "exclude"));
@@ -308,20 +586,21 @@ function filterResults(events){
           }
         }
         else{
-          let regexString = `${(["equals", "begins with"].includes(filter.comparison)) ? "^" : ""}(${filter.criterias.join("|")})${(filter.comparison == "equals") ? "$" : ""}`;
-          let regex = new RegExp(regexString);
-          let result = regex.test(event.getFirstPropertyValue(filter.parameter).toString()) ^ (filter.type == "exclude");
-          if (!result && event.hasProperty('recurrence-id')){
-            let id = event.getFirstPropertyValue('uid');
-            Logger.log(`Filtering recurrence instance of ${id} at ${event.getFirstPropertyValue('dtstart').toICALString()}`);
-            let indx = events.findIndex((e) => e.getFirstPropertyValue('uid') == id && !e.hasProperty('recurrence-id'));
-            if (!events[indx].hasProperty('exdate')){
-              events[indx].addProperty(new ICAL.Property('exdate'));
-            }
-            let exdates = events[indx].getFirstProperty('exdate').getValues().concat(event.getFirstPropertyValue('recurrence-id'));
-            events[indx].getFirstProperty('exdate').setValues(exdates);
+          var matches;
+          if (parameter === "allday") {
+            matches = event.hasProperty('dtstart') && event.getFirstPropertyValue('dtstart').isDate;
+          } else if (parameter === "attendee") {
+            var emails = event.getAllProperties('attendee').map(function(attendee){
+              return String(attendee.getFirstValue()).replace(/^mailto:/i, "");
+            });
+            matches = matchesTextFilter(filter, emails);
+          } else {
+            var values = event.getAllProperties(parameter).map(function(property){ return property.getFirstValue(); });
+            matches = matchesTextFilter(filter, values);
           }
-          return result;
+          var keep = filter.type === "exclude" ? !matches : matches;
+          if (!keep) excludeICSException(events, event);
+          return keep;
         } 
       }
       catch(e){
@@ -335,6 +614,77 @@ function filterResults(events){
   return events;
 }
 
+function nativeEventTime(event, parameter){
+  var part = event[parameter === "dtstart" ? "start" : "end"];
+  return part && (part.dateTime || part.date);
+}
+
+function nativeDateMatches(event, filter, reference){
+  var value = nativeEventTime(event, filter.parameter.toLowerCase());
+  if (!value) return false;
+  var eventTime = new Date(value).getTime();
+  var referenceTime = new Date(reference.toString().slice(0, 10) + "T00:00:00Z").getTime();
+  if (filter.comparison === ">") return eventTime > referenceTime;
+  if (filter.comparison === "<") return eventTime < referenceTime;
+  throw new Error("Unsupported date filter comparison: " + filter.comparison);
+}
+
+function nativeRecurrenceMatches(event, filter, reference, calendarId){
+  var referenceTime = new Date(reference.toString().slice(0, 10) + "T00:00:00Z").toISOString();
+  var options = {maxResults: 2500, showDeleted: false};
+  if (filter.comparison === ">") options.timeMin = referenceTime;
+  else options.timeMax = referenceTime;
+  var pageToken;
+  do {
+    if (pageToken) options.pageToken = pageToken;
+    var page = callWithBackoff(function(){ return Calendar.Events.instances(calendarId, event.id, options); }, defaultMaxRetries);
+    if (!page) throw new Error("Could not read recurrence instances for " + event.id);
+    if ((page.items || []).some(function(instance){ return nativeDateMatches(instance, filter, reference); })) return true;
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return false;
+}
+
+function filterNativeEvents(events, source, calendarId, materialized){
+  if (!filters.some(function(filter){ return filterAppliesToSource(filter, source, calendarId); })) return events;
+  var originalEvents = events;
+  for (var filter of filters){
+    if (!filterAppliesToSource(filter, source, calendarId)) continue;
+    var parameter = filter.parameter.toLowerCase();
+    events = events.filter(function(event){
+      var matches;
+      if (parameter === "dtstart" || parameter === "dtend") {
+        var reference = new ICAL.Time.fromJSDate(new Date(), true).adjust(filter.offset || 0,0,0,0);
+        matches = event.recurrence ? nativeRecurrenceMatches(event, filter, reference, calendarId) : nativeDateMatches(event, filter, reference);
+      } else if (parameter === "allday") {
+        matches = !!(event.start && event.start.date);
+      } else if (parameter === "attendee") {
+        matches = matchesTextFilter(filter, (event.attendees || []).map(function(attendee){ return attendee.email; }).filter(Boolean));
+      } else {
+        var field = parameter === "summary" ? "summary" : parameter;
+        matches = matchesTextFilter(filter, event[field] === undefined ? [] : [event[field]]);
+      }
+      return filter.type === "exclude" ? !matches : matches;
+    });
+  }
+  if (materialized) return events;
+  var survivingParents = {};
+  events.forEach(function(event){ if (event.recurrence) survivingParents[event.id] = true; });
+  events = events.filter(function(event){
+    return !event.recurringEventId || survivingParents[event.recurringEventId];
+  });
+  var keptIds = {};
+  events.forEach(function(event){ keptIds[event.id] = true; });
+  originalEvents.forEach(function(event){
+    if (event.recurringEventId && event.originalStartTime &&
+        survivingParents[event.recurringEventId] && !keptIds[event.id]) {
+      // Excluding an override must also suppress the parent's generated instance.
+      events.push(Object.assign({}, event, {status: "cancelled"}));
+    }
+  });
+  return events;
+}
+
 /**
  * Modifies the end of the given recurrence series.
  *
@@ -343,7 +693,7 @@ function filterResults(events){
  * @param {string} filterParameter - The parameter to filter on
  * @return {ICAL.Component|null} The modified event or null if no instances are within the range
  */
-function modifyRecurrenceEnd(event, referenceDate, filterParameter) {
+function modifyICSRecurrenceEnd(event, referenceDate, filterParameter) {
   let eventRefDate = new ICAL.Time.fromString(event.getFirstPropertyValue('dtstart').toString(), event.getFirstProperty('dtstart'));
   if (filterParameter.toLowerCase() === "dtend"){
     let eventEnd = new ICAL.Time.fromString(event.getFirstPropertyValue('dtend').toString(), event.getFirstProperty('dtend'));
@@ -466,7 +816,7 @@ function modifyRecurrenceEnd(event, referenceDate, filterParameter) {
  * @param {string} filterParameter - The parameter to filter on
  * @return {ICAL.Component|null} The modified event or null if no instances are within the range
  */
-function modifyRecurrenceStart(event, referenceDate, filterParameter) {
+function modifyICSRecurrenceStart(event, referenceDate, filterParameter) {
   let eventRefDate = new ICAL.Time.fromString(event.getFirstPropertyValue('dtstart').toString(), event.getFirstProperty('dtstart'));
   if (filterParameter.toLowerCase() === "dtend"){
     let eventEnd = new ICAL.Time.fromString(event.getFirstPropertyValue('dtend').toString(), event.getFirstProperty('dtend'));
@@ -588,9 +938,9 @@ function modifyRecurrenceStart(event, referenceDate, filterParameter) {
  * @param {ICAL.Component} event - The event to process
  * @param {string} calendarTz - The timezone of the target calendar
  */
-function processEvent(event, calendarTz){
+function processICSEvent(event, calendarTz){
   //------------------------ Create the event object ------------------------
-  var newEvent = createEvent(event, calendarTz);
+  var newEvent = createICSEvent(event, calendarTz);
   if (newEvent == null)
     return;
 
@@ -644,6 +994,97 @@ function processEvent(event, calendarTz){
   }
 }
 
+/** Build only writable Google Calendar event fields, then track the source identity. */
+function makeNativeEvent(sourceEvent, source, sourceKey, materialized){
+  var fields = ["summary", "description", "location", "start", "end", "recurrence", "status",
+                "transparency", "visibility", "colorId", "reminders", "source"];
+  if (addAttendees) fields.push("attendees");
+  var copy = {};
+  fields.forEach(function(field){
+    if (sourceEvent[field] !== undefined) copy[field] = JSON.parse(JSON.stringify(sourceEvent[field]));
+  });
+  if (materialized) delete copy.recurrence;
+  if (descriptionAsTitles && copy.description) copy.summary = copy.description;
+  if (addOrganizerToTitle && sourceEvent.organizer) {
+    copy.summary = (sourceEvent.organizer.displayName || sourceEvent.organizer.email) + ": " + (copy.summary || "");
+  }
+  if (addCalToTitle) copy.summary = "(" + (source.calendar.summaryOverride || source.calendar.summary) + ") " + (copy.summary || "");
+  var configuredColor = configuredEventColor(source.colorId);
+  if (configuredColor !== undefined) copy.colorId = configuredColor;
+  if (["default", "public", "private", "confidential"].indexOf(overrideVisibility.toLowerCase()) !== -1)
+    copy.visibility = overrideVisibility.toLowerCase();
+  if (addAlerts === "no") copy.reminders = {useDefault: false, overrides: []};
+  else if (addAlerts === "default") copy.reminders = {useDefault: true};
+  var id = sourceKey || nativeEventKey(source.calendar.id, sourceEvent.id);
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(copy), Utilities.Charset.UTF_8).toString();
+  copy.extendedProperties = {private: {fromGAS: "true", id: id, MD5: digest}};
+  return copy;
+}
+
+function processNativeEvent(item){
+  var event = item.nativeEvent;
+  if (!item.materialized && event.recurringEventId && event.originalStartTime) {
+    nativeExceptions.push(item);
+    return;
+  }
+  if (!event.start || !event.end) return;
+  var copy = makeNativeEvent(event, item.source, item.sourceKey, item.materialized);
+  var index = calendarEventsIds.indexOf(copy.extendedProperties.private.id);
+  if (index !== -1 && calendarEvents[index].extendedProperties.private.MD5 === copy.extendedProperties.private.MD5) return;
+  try {
+    var oldEvent = index === -1 ? null : calendarEvents[index];
+    if (oldEvent && !modifyExistingEvents || !oldEvent && !addEventsToCalendar) return;
+    var saved = callWithBackoff(function(){
+      return oldEvent ? Calendar.Events.update(copy, targetCalendarId, oldEvent.id) : Calendar.Events.insert(copy, targetCalendarId);
+    }, defaultMaxRetries);
+    if (!saved) throw new Error("Could not save native event " + event.id);
+    if (emailSummary) {
+      if (oldEvent) modifiedEvents.push([[oldEvent.summary, saved.summary, oldEvent.start.date || oldEvent.start.dateTime, saved.start.date || saved.start.dateTime, oldEvent.end.date || oldEvent.end.dateTime, saved.end.date || saved.end.dateTime, oldEvent.location, saved.location, oldEvent.description, saved.description], targetCalendarName]);
+      else addedEvents.push([[saved.summary, saved.start.date || saved.start.dateTime, saved.end.date || saved.end.dateTime, saved.location, saved.description], targetCalendarName]);
+    }
+  } catch (e) {
+    Logger.log("Could not sync native event " + event.id + ": " + e);
+    reportOverallFailure = true;
+  }
+}
+
+/** Apply source recurrence overrides to the corresponding target series instance. */
+function processNativeExceptions(){
+  nativeExceptions.forEach(function(item){
+    var sourceEvent = item.nativeEvent;
+    try {
+      var parentKey = nativeEventKey(item.source.calendar.id, sourceEvent.recurringEventId);
+      var parentList = callWithBackoff(function(){ return Calendar.Events.list(targetCalendarId, {privateExtendedProperty: "id=" + parentKey, maxResults: 2500}); }, defaultMaxRetries);
+      if (!parentList) throw new Error("Could not find target recurring parent");
+      var parent = (parentList.items || []).filter(function(event){ return event.recurrence && event.extendedProperties && event.extendedProperties.private && event.extendedProperties.private.id === parentKey; })[0];
+      if (!parent) throw new Error("Target recurring parent is missing: " + parentKey);
+      var originalStart = sourceEvent.originalStartTime.dateTime || sourceEvent.originalStartTime.date;
+      var instanceList = callWithBackoff(function(){ return Calendar.Events.instances(targetCalendarId, parent.id, {originalStart: originalStart, showDeleted: true}); }, defaultMaxRetries);
+      if (!instanceList) throw new Error("Could not list target recurrence instances");
+      var instances = instanceList.items || [];
+      var instance = instances.filter(function(event){
+        return event.originalStartTime && sameOriginalStart(event.originalStartTime.dateTime || event.originalStartTime.date, originalStart);
+      })[0];
+      if (!instance) throw new Error("Target recurrence instance is missing: " + originalStart);
+      if (sourceEvent.status === "cancelled") {
+        if (removeEventsFromCalendar && instance.status !== "cancelled")
+          callWithBackoff(function(){ return Calendar.Events.remove(targetCalendarId, instance.id); }, defaultMaxRetries);
+        return;
+      }
+      if (!modifyExistingEvents) return;
+      var copy = makeNativeEvent(sourceEvent, item.source);
+      copy.extendedProperties.private["rec-id"] = nativeEventKey(item.source.calendar.id, sourceEvent.id);
+      if (instance.status !== "cancelled" && instance.extendedProperties && instance.extendedProperties.private && instance.extendedProperties.private.MD5 === copy.extendedProperties.private.MD5) return;
+      if (instance.status === "cancelled" && !copy.status) copy.status = "confirmed";
+      var savedException = callWithBackoff(function(){ return Calendar.Events.patch(copy, targetCalendarId, instance.id); }, defaultMaxRetries);
+      if (!savedException) throw new Error("Could not update target recurrence instance");
+    } catch (e) {
+      Logger.log("Could not sync native recurrence exception " + sourceEvent.id + ": " + e);
+      reportOverallFailure = true;
+    }
+  });
+}
+
 /**
  * Creates a Google Calendar Event based on the specified ICALEvent.
  * Will return null if the event has not changed since the last sync.
@@ -652,7 +1093,7 @@ function processEvent(event, calendarTz){
  * @param {string} calendarTz - The timezone of the target calendar
  * @return {?Calendar.Event} The Calendar.Event that will be added to the target calendar
  */
-function createEvent(event, calendarTz){
+function createICSEvent(event, calendarTz){
   event.removeProperty('dtstamp');
   var icalEvent = new ICAL.Event(event);
 
@@ -681,11 +1122,11 @@ function createEvent(event, calendarTz){
     newEvent = {
       start: {
         dateTime : icalEvent.startDate.toString(),
-        timeZone : validateTimeZone(icalEvent.startDate.timezone || icalEvent.startDate.zone, calendarTz)
+        timeZone : validateICSTimeZone(icalEvent.startDate.timezone || icalEvent.startDate.zone, calendarTz)
       },
       end: {
         dateTime : icalEvent.endDate.toString(),
-        timeZone : validateTimeZone(icalEvent.endDate.timezone || icalEvent.endDate.zone, calendarTz)
+        timeZone : validateICSTimeZone(icalEvent.endDate.timezone || icalEvent.endDate.zone, calendarTz)
       },
     };
   }
@@ -693,15 +1134,15 @@ function createEvent(event, calendarTz){
   if (addAttendees && event.hasProperty('attendee')){
     newEvent.attendees = [];
     for (var att of icalEvent.attendees){
-      var mail = parseAttendeeMail(att.toICALString());
+      var mail = parseICSAttendeeMail(att.toICALString());
       if (mail != null){
         var newAttendee = {'email' : mail };
 
-        var name = parseAttendeeName(att.toICALString());
+        var name = parseICSAttendeeName(att.toICALString());
         if (name != null)
           newAttendee['displayName'] = name;
 
-        var resp = parseAttendeeResp(att.toICALString());
+        var resp = parseICSAttendeeResp(att.toICALString());
         if (resp != null)
           newAttendee['responseStatus'] = resp;
 
@@ -799,7 +1240,7 @@ function createEvent(event, calendarTz){
             trigger = alarmTime.subtractDateTz(icalEvent.startDate).toString();
           }catch(e){}
           if (overrides.length < 5){ //Google supports max 5 reminder-overrides
-            var timer = parseNotificationTime(trigger);
+            var timer = parseICSNotificationTime(trigger);
             if (0 <= timer && timer <= 40320)
               overrides.push({'method' : 'popup', 'minutes' : timer});
           }
@@ -835,7 +1276,7 @@ function createEvent(event, calendarTz){
     var utcTime = new Date(Utilities.formatDate(jsTime, "Etc/GMT", "HH:mm:ss MM/dd/yyyy"));
     var tgtTime = new Date(Utilities.formatDate(jsTime, calendarTz, "HH:mm:ss MM/dd/yyyy"));
     calendarUTCOffset = tgtTime - utcTime;
-    newEvent.recurrence = parseRecurrenceRule(event, calendarUTCOffset);
+    newEvent.recurrence = parseICSRecurrenceRule(event, calendarUTCOffset);
   }
 
   newEvent.extendedProperties = { private: { MD5 : digest, fromGAS : "true", id : icalEvent.uid } };
@@ -863,52 +1304,44 @@ function createEvent(event, calendarTz){
  *
  * @param {Calendar.Event} recEvent - The event instance to process
  */
-function processEventInstance(recEvent){
-  Logger.log("ID: " + recEvent.extendedProperties.private["id"] + " | Date: "+ recEvent.recurringEventId);
-
-  var eventInstanceToPatch = callWithBackoff(function(){
-    return Calendar.Events.list(targetCalendarId,
-      { singleEvents : true,
-        privateExtendedProperty : "fromGAS=true",
-        privateExtendedProperty : "rec-id=" + recEvent.extendedProperties.private["id"] + "_" + recEvent.recurringEventId
-      }).items;
-  }, defaultMaxRetries);
-
-  if (eventInstanceToPatch == null || eventInstanceToPatch.length == 0){
-    if (recEvent.recurringEventId.length == 10){
-      recEvent.recurringEventId += "T00:00:00Z";
-    }
-    else if (recEvent.recurringEventId.substr(-1) !== "Z"){
-      recEvent.recurringEventId += "Z";
-    }
-    eventInstanceToPatch = callWithBackoff(function(){
-       return Calendar.Events.list(targetCalendarId,
-        { singleEvents : true,
-          orderBy : "startTime",
-          maxResults: 1,
-          timeMin : recEvent.recurringEventId,
-          privateExtendedProperty : "fromGAS=true",
-          privateExtendedProperty : "id=" + recEvent.extendedProperties.private["id"]
-        }).items;
+function processICSEventInstance(recEvent){
+  var sourceId = recEvent.extendedProperties.private.id;
+  var originalStart = recEvent.recurringEventId;
+  try {
+    var parents = callWithBackoff(function(){
+      return Calendar.Events.list(targetCalendarId, {privateExtendedProperty: "id=" + sourceId, maxResults: 2500});
     }, defaultMaxRetries);
+    if (!parents) throw new Error("Could not find target recurring parent");
+    var parent = (parents.items || []).filter(function(event){
+      return event.recurrence && event.extendedProperties && event.extendedProperties.private &&
+             event.extendedProperties.private.fromGAS === "true" && event.extendedProperties.private.id === sourceId;
+    })[0];
+    if (!parent) throw new Error("Recurring parent is missing: " + sourceId);
+    var instances = callWithBackoff(function(){
+      return Calendar.Events.instances(targetCalendarId, parent.id, {originalStart: originalStart, showDeleted: true, maxResults: 2500});
+    }, defaultMaxRetries);
+    if (!instances) throw new Error("Could not list target recurrence instances");
+    var instance = (instances.items || []).filter(function(event){
+      return event.originalStartTime && sameOriginalStart(event.originalStartTime.dateTime || event.originalStartTime.date, originalStart);
+    })[0];
+    if (!instance) throw new Error("Recurrence instance is missing: " + originalStart);
+    if (!modifyExistingEvents || (instance.status !== "cancelled" && instance.extendedProperties && instance.extendedProperties.private &&
+        instance.extendedProperties.private.MD5 === recEvent.extendedProperties.private.MD5)) return;
+    delete recEvent.recurringEventId; // This is the source recurrence-id, not a Google parent event ID.
+    if (instance.status === "cancelled" && !recEvent.status) recEvent.status = "confirmed";
+    var updated = callWithBackoff(function(){ return Calendar.Events.patch(recEvent, targetCalendarId, instance.id); }, defaultMaxRetries);
+    if (!updated) throw new Error("Could not update recurrence instance: " + instance.id);
+  } catch (e) {
+    Logger.log("Could not sync recurrence exception " + sourceId + " at " + originalStart + ": " + e);
+    reportOverallFailure = true;
   }
+}
 
-  if (eventInstanceToPatch !== null && eventInstanceToPatch.length == 1){
-    if (modifyExistingEvents){
-      Logger.log("Updating existing event instance");
-      callWithBackoff(function(){
-        Calendar.Events.update(recEvent, targetCalendarId, eventInstanceToPatch[0].id);
-      }, defaultMaxRetries);
-    }
-  }
-  else{
-    if (addEventsToCalendar){
-      Logger.log("No Instance matched, adding as new event!");
-      callWithBackoff(function(){
-        Calendar.Events.insert(recEvent, targetCalendarId);
-      }, defaultMaxRetries);
-    }
-  }
+function sameOriginalStart(first, second){
+  if (first === second) return true;
+  if (!first || !second) return false;
+  if (first.length === 10 || second.length === 10) return first.slice(0, 10) === second.slice(0, 10);
+  return new Date(first).getTime() === new Date(second).getTime();
 }
 
 /**
@@ -952,7 +1385,7 @@ function processEventCleanup(){
  *
  * @param {Array.string} responses - Array with all ical sources
  */
-function processTasks(responses){
+function processICSTasks(responses){
   var taskLists = Tasks.Tasklists.list().items;
   var taskList = taskLists[0];
 
@@ -967,7 +1400,7 @@ function processTasks(responses){
   var vtasks = [];
 
   for (var resp of responses){
-    var jcalData = ICAL.parse(resp);
+    var jcalData = ICAL.parse(resp.content);
     var component = new ICAL.Component(jcalData);
 
     vtasks = [].concat(component.getAllSubcomponents("vtodo"), vtasks);
@@ -1012,7 +1445,7 @@ function processTasks(responses){
  * @param {string} tzid - Timezone descriptor to validate
  * @return {string} Valid IANA timezone descriptor
  */
-function validateTimeZone(tzid, calendarTz){
+function validateICSTimeZone(tzid, calendarTz){
   tzid = tzid.toString();
   let IanaTZ;
   if (tzids.indexOf(tzid) == -1){
@@ -1034,7 +1467,7 @@ function validateTimeZone(tzid, calendarTz){
  * @param {number} utcOffset - utc offset of the target calendar
  * @return {Array.String} Array with all recurrence components found in the provided event
  */
-function parseRecurrenceRule(vevent, utcOffset){
+function parseICSRecurrenceRule(vevent, utcOffset){
   var recurrenceRules = vevent.getAllProperties('rrule');
   var exRules = vevent.getAllProperties('exrule');//deprecated, for compatibility only
   var exDates = vevent.getAllProperties('exdate');
@@ -1105,7 +1538,7 @@ function parseRecurrenceRule(vevent, utcOffset){
  * @param {string} veventString - The string to parse
  * @return {?String} The Attendee's name found in the string, null if no name was found
  */
-function parseAttendeeName(veventString){
+function parseICSAttendeeName(veventString){
   var nameMatch = RegExp("(cn=)([^;$:]*)", "gi").exec(veventString);
   if (nameMatch != null && nameMatch.length > 1)
     return nameMatch[2];
@@ -1120,7 +1553,7 @@ function parseAttendeeName(veventString){
  * @param {string} veventString - The string to parse
  * @return {?String} The Attendee's mail adress found in the string, null if nothing was found
  */
-function parseAttendeeMail(veventString){
+function parseICSAttendeeMail(veventString){
   var mailMatch = RegExp("(:mailto:)([^;$:]*)", "gi").exec(veventString);
   if (mailMatch != null && mailMatch.length > 1)
     return mailMatch[2];
@@ -1135,7 +1568,7 @@ function parseAttendeeMail(veventString){
  * @param {string} veventString - The string to parse
  * @return {?String} The Attendee's response found in the string, null if nothing was found or unsupported
  */
-function parseAttendeeResp(veventString){
+function parseICSAttendeeResp(veventString){
   var respMatch = RegExp("(partstat=)([^;$:]*)", "gi").exec(veventString);
   if (respMatch != null && respMatch.length > 1){
     if (['NEEDS-ACTION'].indexOf(respMatch[2].toUpperCase()) > -1) {
@@ -1167,7 +1600,7 @@ function parseAttendeeResp(veventString){
  * @param {string} notificationString - The string to parse
  * @return {number} The notification time in minutes
  */
-function parseNotificationTime(notificationString){
+function parseICSNotificationTime(notificationString){
   //https://www.kanzaki.com/docs/ical/duration-t.html
   var reminderTime = 0;
 
@@ -1215,47 +1648,47 @@ function sendSummary() {
 
   body = "GAS-ICS-Sync made the following changes to your calendar:<br/>";
   for (var tgtCal of addedEvents){
-    body += `<br/>${tgtCal[0]}: ${tgtCal[1].length} added events<br/><ul>`;
-    for (var addedEvent of tgtCal[1]){
+    body += `<br/>${tgtCal.target}: ${tgtCal.sources.length} added events<br/><ul>`;
+    for (var addedEvent of tgtCal.sources){
       body += "<li>"
-        + "Name: " + addedEvent[0][0] + "<br/>"
-        + "Start: " + formatDate(addedEvent[0][1]) + "<br/>"
-        + "End: " + formatDate(addedEvent[0][2]) + "<br/>"
-        + (addedEvent[0][3] ? ("Location: " + addedEvent[0][3] + "<br/>") : "")
-        + (addedEvent[0][4] ? ("Description: " + addedEvent[0][4] + "<br/>") : "")
+        + "Name: " + addedEvent.source[0] + "<br/>"
+        + "Start: " + formatDate(addedEvent.source[1]) + "<br/>"
+        + "End: " + formatDate(addedEvent.source[2]) + "<br/>"
+        + (addedEvent.source[3] ? ("Location: " + addedEvent.source[3] + "<br/>") : "")
+        + (addedEvent.source[4] ? ("Description: " + addedEvent.source[4] + "<br/>") : "")
         + "</li>";
     }
     body += "</ul>";
   }
 
   for (var tgtCal of modifiedEvents){
-    body += `<br/>${tgtCal[0]}: ${tgtCal[1].length} modified events<br/><ul>`;
-    for (var modifiedEvent of tgtCal[1]){
+    body += `<br/>${tgtCal.target}: ${tgtCal.sources.length} modified events<br/><ul>`;
+    for (var modifiedEvent of tgtCal.sources){
       body += "<li>"
-        + (modifiedEvent[0][0] != modifiedEvent[0][1] ? ("<del>Name: " + modifiedEvent[0][0] + "</del><br/>") : "")
-        + "Name: " + modifiedEvent[0][1] + "<br/>"
-        + (modifiedEvent[0][2] != modifiedEvent[0][3] ? ("<del>Start: " + formatDate(modifiedEvent[0][2]) + "</del><br/>") : "")
-        + " Start: " + formatDate(modifiedEvent[0][3]) + "<br/>"
-        + (modifiedEvent[0][4] != modifiedEvent[0][5] ? ("<del>End: " + formatDate(modifiedEvent[0][4]) + "</del><br/>") : "")
-        + " End: " + formatDate(modifiedEvent[0][5]) + "<br/>"
-        + (modifiedEvent[0][6] != modifiedEvent[0][7] ? ("<del>Location: " + (modifiedEvent[0][6] ? modifiedEvent[0][6] : "") + "</del><br/>") : "")
-        + (modifiedEvent[0][7] ? (" Location: " + modifiedEvent[0][7] + "<br/>") : "")
-        + (modifiedEvent[0][8] != modifiedEvent[0][9] ? ("<del>Description: " + (modifiedEvent[0][8] ? modifiedEvent[0][8] : "") + "</del><br/>") : "")
-        + (modifiedEvent[0][9] ? (" Description: " + modifiedEvent[0][9] + "<br/>") : "")
+        + (modifiedEvent.source[0] != modifiedEvent.source[1] ? ("<del>Name: " + modifiedEvent.source[0] + "</del><br/>") : "")
+        + "Name: " + modifiedEvent.source[1] + "<br/>"
+        + (modifiedEvent.source[2] != modifiedEvent.source[3] ? ("<del>Start: " + formatDate(modifiedEvent.source[2]) + "</del><br/>") : "")
+        + " Start: " + formatDate(modifiedEvent.source[3]) + "<br/>"
+        + (modifiedEvent.source[4] != modifiedEvent.source[5] ? ("<del>End: " + formatDate(modifiedEvent.source[4]) + "</del><br/>") : "")
+        + " End: " + formatDate(modifiedEvent.source[5]) + "<br/>"
+        + (modifiedEvent.source[6] != modifiedEvent.source[7] ? ("<del>Location: " + (modifiedEvent.source[6] ? modifiedEvent.source[6] : "") + "</del><br/>") : "")
+        + (modifiedEvent.source[7] ? (" Location: " + modifiedEvent.source[7] + "<br/>") : "")
+        + (modifiedEvent.source[8] != modifiedEvent.source[9] ? ("<del>Description: " + (modifiedEvent.source[8] ? modifiedEvent.source[8] : "") + "</del><br/>") : "")
+        + (modifiedEvent.source[9] ? (" Description: " + modifiedEvent.source[9] + "<br/>") : "")
         + "</li>";
     }
     body += "</ul>";
   }
 
   for (var tgtCal of removedEvents){
-    body += `<br/>${tgtCal[0]}: ${tgtCal[1].length} removed events<br/><ul>`;
-    for (var removedEvent of tgtCal[1]){
+    body += `<br/>${tgtCal.target}: ${tgtCal.sources.length} removed events<br/><ul>`;
+    for (var removedEvent of tgtCal.sources){
       body += "<li>"
-        + "<del>Name: " + removedEvent[0][0] + "</del><br/>"
-        + "<del>Start: " + formatDate(removedEvent[0][1]) + "</del><br/>"
-        + "<del>End: " + formatDate(removedEvent[0][2]) + "</del><br/>"
-        + (removedEvent[0][3] ? ("<del>Location: " + removedEvent[0][3] + "</del><br/>") : "")
-        + (removedEvent[0][4] ? ("<del>Description: " + removedEvent[0][4] + "</del><br/>") : "")
+        + "<del>Name: " + removedEvent.source[0] + "</del><br/>"
+        + "<del>Start: " + formatDate(removedEvent.source[1]) + "</del><br/>"
+        + "<del>End: " + formatDate(removedEvent.source[2]) + "</del><br/>"
+        + (removedEvent.source[3] ? ("<del>Location: " + removedEvent.source[3] + "</del><br/>") : "")
+        + (removedEvent.source[4] ? ("<del>Description: " + removedEvent.source[4] + "</del><br/>") : "")
         + "</li>";
     }
     body += "</ul>";
@@ -1287,6 +1720,7 @@ var backoffRecoverableErrors = [
   "http error 403", // forbidden
   "http error 408", // request timeout
   "http error 423", // locked
+  "http error 429", // rate limited
   "http error 500", // internal server error
   "http error 503", // service unavailable
   "http error 504"  // gateway timeout
@@ -1319,34 +1753,168 @@ function callWithBackoff(func, maxRetries) {
   return null;
 }
 
-/**
- * Checks for a new version of the script at https://github.com/derekantrican/GAS-ICS-Sync/releases.
- * Will notify the user once if a new version was released.
- */
+/** Migrate an old daily update trigger without disturbing sync triggers. */
 function checkForUpdate(){
-  // No need to check if we can't alert anyway
-  if (email == "")
+  var triggers = ScriptApp.getProjectTriggers();
+  var hasAutoUpdate = triggers.some(function(trigger){
+    return trigger.getHandlerFunction() === "AutoUpdate";
+  });
+  if (!hasAutoUpdate)
+    ScriptApp.newTrigger("AutoUpdate").timeBased().everyDays(1).create();
+  triggers.forEach(function(trigger){
+    if (trigger.getHandlerFunction() === "checkForUpdate")
+      ScriptApp.deleteTrigger(trigger);
+  });
+}
+
+/**
+ * Check the configured fork for an update. AutoUpdate(true) previews without
+ * writing project content or sending an email. The installed Config.gs and
+ * filters.gs are always retained, including when the release contains copies.
+ */
+function AutoUpdate(dryRun){
+  var preview = dryRun === true;
+  var repo = String(autoUpdateRepository || "");
+  var mode = String(autoUpdateMode || "");
+  var channel = String(autoUpdateChannel || "");
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo))
+    throw new Error("Set autoUpdateRepository to owner/repository in Config.gs");
+  if (mode !== "auto" && mode !== "email")
+    throw new Error("autoUpdateMode must be auto or email");
+  if (channel !== "release" && channel !== "bleeding-edge")
+    throw new Error("autoUpdateChannel must be release or bleeding-edge");
+  if (channel === "bleeding-edge" && !/^[A-Za-z0-9._\/-]+$/.test(String(autoUpdateBranch || "")))
+    throw new Error("Set a valid autoUpdateBranch in Config.gs");
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)){
+    Logger.log("Another update check is running");
     return;
-
-  var lastAlertedVersion = PropertiesService.getScriptProperties().getProperty("alertedForNewVersion");
-  try {
-    var thisVersion = 5.8;
-    var latestVersion = getLatestVersion();
-
-    if (latestVersion > thisVersion && latestVersion != lastAlertedVersion){
-      MailApp.sendEmail(email,
-        `Version ${latestVersion} of GAS-ICS-Sync is available! (You have ${thisVersion})`,
-        "You can see the latest release here: https://github.com/derekantrican/GAS-ICS-Sync/releases");
-
-      PropertiesService.getScriptProperties().setProperty("alertedForNewVersion", latestVersion);
-    }
   }
-  catch (e){}
+  try {
+    var api = "https://api.github.com/repos/" + repo;
+    var version;
+    if (channel === "release"){
+      var release = autoUpdateGithubJson_(api + "/releases/latest");
+      if (!release.tag_name || !release.html_url)
+        throw new Error("Latest GitHub release has no tag or URL");
+      version = {ref: release.tag_name, key: "release:" + release.tag_name,
+        url: release.html_url};
+    } else {
+      var branch = autoUpdateGithubJson_(api + "/branches/" + encodeURIComponent(autoUpdateBranch));
+      if (!branch.commit || !/^[a-f0-9]{40}$/.test(branch.commit.sha || ""))
+        throw new Error("GitHub branch response has no commit SHA");
+      version = {ref: branch.commit.sha, key: "commit:" + branch.commit.sha,
+        url: "https://github.com/" + repo + "/commit/" + branch.commit.sha};
+    }
 
-  function getLatestVersion(){
-    var json_encoded = UrlFetchApp.fetch("https://api.github.com/repos/derekantrican/GAS-ICS-Sync/releases?per_page=1");
-    var json_decoded = JSON.parse(json_encoded);
-    var version = json_decoded[0]["tag_name"];
-    return Number(version);
+    var properties = PropertiesService.getScriptProperties();
+    var propertyKey = "AutoUpdate:" + repo + ":" + channel + ":" + (channel === "bleeding-edge" ? autoUpdateBranch : "release");
+    var lastSeen = properties.getProperty(propertyKey);
+    if (!preview && lastSeen === version.key){
+      Logger.log("Already handled " + version.key);
+      return version;
+    }
+
+    if (mode === "email" && !preview){
+      if (!email) throw new Error("Set email in Config.gs for email update notices");
+      MailApp.sendEmail(email, "GAS-ICS-Sync update available: " + version.key,
+        "An update is available from " + repo + ": " + version.url);
+      properties.setProperty(propertyKey, version.key);
+      Logger.log("Sent update notice for " + version.key);
+      return version;
+    }
+
+    // Fetch all root-level Apps Script sources at the same immutable ref.
+    var contentsUrl = api + "/contents?ref=" + encodeURIComponent(version.ref);
+    var listing = autoUpdateGithubJson_(contentsUrl);
+    if (!Array.isArray(listing)) throw new Error("GitHub repository root is not a directory");
+    var remoteFiles = [];
+    var names = {};
+    listing.forEach(function(entry){
+      if (entry.type !== "file") return;
+      var name = entry.name;
+      if (name === "Config.gs" || name === "filters.gs") return;
+      if (!/\.gs$/.test(name) && name !== "appsscript.json") return;
+      var result = autoUpdateGithubJson_(api + "/contents/" + encodeURIComponent(name) +
+        "?ref=" + encodeURIComponent(version.ref));
+      if (result.encoding !== "base64" || !result.content)
+        throw new Error("GitHub did not return file content for " + name);
+      var source = Utilities.newBlob(Utilities.base64Decode(result.content.replace(/\s/g, "")))
+        .getDataAsString("UTF-8");
+      var scriptName = name === "appsscript.json" ? "appsscript" : name.slice(0, -3);
+      if (names[scriptName]) throw new Error("Duplicate script file " + scriptName);
+      names[scriptName] = true;
+      remoteFiles.push({name: scriptName, type: name === "appsscript.json" ? "JSON" : "SERVER_JS", source: source});
+    });
+    ["Code", "Helpers", "ical.js", "tzid", "appsscript"].forEach(function(required){
+      if (!names[required]) throw new Error("Release is missing " + required);
+    });
+    var remoteHelpers = remoteFiles.filter(function(file){ return file.name === "Helpers"; })[0].source;
+    if (!/function\s+AutoUpdate\s*\(/.test(remoteHelpers))
+      throw new Error("Selected version does not contain AutoUpdate; publish this updater to the fork first");
+
+    var manifest = remoteFiles.filter(function(file){ return file.name === "appsscript"; })[0];
+    var manifestObject = JSON.parse(manifest.source);
+    var projectUrl = "https://script.googleapis.com/v1/projects/" +
+      encodeURIComponent(ScriptApp.getScriptId()) + "/content";
+    var current = autoUpdateScriptRequest_(projectUrl, "get");
+    if (!Array.isArray(current.files)) throw new Error("Apps Script returned no project files");
+    var currentManifest = current.files.filter(function(file){ return file.name === "appsscript"; })[0];
+    if (!currentManifest) throw new Error("This Apps Script project has no manifest");
+    var currentManifestObject = JSON.parse(currentManifest.source);
+    var requiredScopes = ["https://www.googleapis.com/auth/script.projects",
+      "https://www.googleapis.com/auth/script.external_request"];
+    if (Array.isArray(currentManifestObject.oauthScopes))
+      requiredScopes = requiredScopes.concat(currentManifestObject.oauthScopes);
+    if (!Array.isArray(manifestObject.oauthScopes)) manifestObject.oauthScopes = [];
+    requiredScopes.forEach(function(scope){
+      if (manifestObject.oauthScopes.indexOf(scope) < 0) manifestObject.oauthScopes.push(scope);
+    });
+    manifest.source = JSON.stringify(manifestObject, null, 2);
+    var preserved = current.files.filter(function(file){
+      return !names[file.name] || file.name === "Config" || file.name === "filters";
+    }).map(function(file){ return {name: file.name, type: file.type, source: file.source}; });
+    if (!preserved.some(function(file){ return file.name === "Config"; }))
+      throw new Error("This Apps Script project has no Config.gs to preserve");
+    if (!preserved.some(function(file){ return file.name === "filters"; }))
+      throw new Error("This Apps Script project has no filters.gs to preserve");
+    version.files = remoteFiles.map(function(file){ return file.name; });
+    if (preview){
+      Logger.log("Would install " + version.key + " from " + version.url +
+        "; managed files: " + version.files.join(", "));
+      return version;
+    }
+
+    autoUpdateScriptRequest_(projectUrl, "put", {files: remoteFiles.concat(preserved)});
+    properties.setProperty(propertyKey, version.key);
+    Logger.log("Installed " + version.key + " from " + version.url);
+    return version;
+  } finally {
+    lock.releaseLock();
   }
 }
+
+function autoUpdateGithubJson_(url){
+  var response = UrlFetchApp.fetch(url, {muteHttpExceptions: true,
+    headers: {Accept: "application/vnd.github+json", "User-Agent": "GAS-ICS-Sync-AutoUpdate"}});
+  var status = response.getResponseCode();
+  if (status < 200 || status >= 300)
+    throw new Error("GitHub API returned HTTP " + status + " for " + url);
+  return JSON.parse(response.getContentText("UTF-8"));
+}
+
+function autoUpdateScriptRequest_(url, method, body){
+  var options = {method: method, muteHttpExceptions: true,
+    headers: {Authorization: "Bearer " + ScriptApp.getOAuthToken()}};
+  if (body){
+    options.contentType = "application/json";
+    options.payload = JSON.stringify(body);
+  }
+  var response = UrlFetchApp.fetch(url, options);
+  var status = response.getResponseCode();
+  if (status < 200 || status >= 300)
+    throw new Error("Apps Script API returned HTTP " + status + ": " + response.getContentText("UTF-8").slice(0, 300));
+  return JSON.parse(response.getContentText("UTF-8"));
+}
+

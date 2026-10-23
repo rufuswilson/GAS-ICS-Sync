@@ -6,7 +6,7 @@
 * 1) Make a copy:
 *      New Interface: Go to the project overview icon on the left (looks like this: ⓘ), then click the "copy" icon on the top right (looks like two files on top of each other)
 *      Old Interface: Click in the menu "File" > "Make a copy..." and make a copy to your Google Drive
-* 2) Settings: Change lines 24-50 to be the settings that you want to use
+* 2) Settings: Edit Config.gs to set your calendar mappings and sync options
 * 3) Install:
 *      New Interface: Make sure your toolbar says "install" to the right of "Debug", then click "Run"
 *      Old Interface: Click "Run" > "Run function" > "install"
@@ -18,41 +18,10 @@
 * **To stop the Script from running click in the menu "Run" > "Run function" > "uninstall" (New Interface: change the dropdown to the right of "Debug" from "install" to "uninstall")
 *
 *=========================================
-*               SETTINGS
+*            CONFIGURATION
 *=========================================
-*/
-
-var sourceCalendars = [                // The ics/ical urls that you want to get events from along with their target calendars (list a new row for each mapping of ICS url to Google Calendar)
-                                       // For instance: ["https://p24-calendars.icloud.com/holidays/us_en.ics", "US Holidays"]
-                                       // Or with colors following mapping https://developers.google.com/apps-script/reference/calendar/event-color,
-                                       // for instance: ["https://p24-calendars.icloud.com/holidays/us_en.ics", "US Holidays", "11"]
-  ["icsUrl1", "targetCalendar1"],
-  ["icsUrl2", "targetCalendar2"],
-  ["icsUrl3", "targetCalendar1"]
-
-];
-
-var howFrequent = 15;                     // What interval (minutes) to run this script on to check for new events.  Any integer can be used, but will be rounded up to 5, 10, 15, 30 or to the nearest hour after that.. 60, 120, etc. 1440 (24 hours) is the maximum value.  Anything above that will be replaced with 1440.
-var addEventsToCalendar = true;           // If you turn this to "false", you can check the log (View > Logs) to make sure your events are being read correctly before turning this on
-var modifyExistingEvents = true;          // If you turn this to "false", any event in the feed that was modified after being added to the calendar will not update
-var removeEventsFromCalendar = true;      // If you turn this to "true", any event created by the script that is not found in the feed will be removed.
-var removePastEventsFromCalendar = true;  // If you turn this to "false", any event that is in the past will not be removed.
-var addAlerts = "yes";                    // Whether to add the ics/ical alerts as notifications on the Google Calendar events or revert to the calendar's default reminders ("yes", "no", "default").
-var addOrganizerToTitle = false;          // Whether to prefix the event name with the event organiser for further clarity
-var descriptionAsTitles = false;          // Whether to use the ics/ical descriptions as titles (true) or to use the normal titles as titles (false)
-var addCalToTitle = false;                // Whether to add the source calendar to title
-var addAttendees = false;                 // Whether to add the attendee list. If true, duplicate events will be automatically added to the attendees' calendar.
-var defaultAllDayReminder = -1;           // Default reminder for all day events in minutes before the day of the event (-1 = no reminder, the value has to be between 0 and 40320)
-                                          // See https://github.com/derekantrican/GAS-ICS-Sync/issues/75 for why this is neccessary.
-var overrideVisibility = "";              // Changes the visibility of the event ("default", "public", "private", "confidential"). Anything else will revert to the class value of the ICAL event.
-var addTasks = false;
-
-var emailSummary = false;                 // Will email you when an event is added/modified/removed to your calendar
-var email = "";                           // OPTIONAL: If "emailSummary" is set to true or you want to receive update notifications, you will need to provide your email address
-var customEmailSubject = "";              // OPTIONAL: If you want to change the email subject, provide a custom one here. Default: "GAS-ICS-Sync Execution Summary"
-var dateFormat = "YYYY-MM-DD"             // date format in the email summary (e.g. "YYYY-MM-DD", "DD.MM.YYYY", "MM/DD/YYYY". separators are ".", "-" and "/")
-
-/*
+* Edit Config.gs to set your calendar mappings and sync options.
+*
 *=========================================
 *           ABOUT THE AUTHOR
 *=========================================
@@ -118,8 +87,8 @@ function install() {
   }
   ScriptApp.newTrigger("startSync").timeBased().after(1000).create();
 
-  // Schedule sync routine to look for update once per day using everyDays
-  ScriptApp.newTrigger("checkForUpdate")
+  // Check the selected GitHub channel once a day.
+  ScriptApp.newTrigger("AutoUpdate")
     .timeBased()
     .everyDays(1)
     .create();
@@ -129,12 +98,73 @@ function uninstall(){
   deleteAllTriggers();
 }
 
+/** Run this from the Apps Script editor to preview an update without installing it. */
+function PreviewUpdate(){
+  return AutoUpdate(true);
+}
+
+/**
+ * Preview or remove events created by this script from one configured target.
+ * Call clearGASEvents("Target") to preview, then clearGASEvents("Target", false)
+ * to delete. This does not create a calendar when the target is missing.
+ */
+function clearGASEvents(targetName, dryRun){
+  if (!targetName || !condenseCalendarMap(sourceCalendars).some(function(group){ return group.target === targetName; }))
+    throw new Error("Specify a configured target calendar name");
+
+  var calendars = [];
+  var pageToken;
+  do {
+    var options = {showHidden: true, maxResults: 250};
+    if (pageToken) options.pageToken = pageToken;
+    var page = callWithBackoff(function(){ return Calendar.CalendarList.list(options); }, defaultMaxRetries);
+    if (!page) throw new Error("Could not list calendars");
+    calendars = calendars.concat(page.items || []);
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  var matches = calendars.filter(function(calendar){
+    return (calendar.summaryOverride || calendar.summary) === targetName &&
+      (calendar.accessRole === "owner" || calendar.accessRole === "writer");
+  });
+  if (matches.length !== 1) throw new Error("Expected exactly one writable target calendar named " + targetName);
+
+  var events = [];
+  pageToken = undefined;
+  do {
+    var eventOptions = {maxResults: 2500, showDeleted: false, singleEvents: false,
+      privateExtendedProperty: "fromGAS=true"};
+    if (pageToken) eventOptions.pageToken = pageToken;
+    var eventPage = callWithBackoff(function(){ return Calendar.Events.list(matches[0].id, eventOptions); }, defaultMaxRetries);
+    if (!eventPage) throw new Error("Could not list script-created events");
+    events = events.concat((eventPage.items || []).filter(function(event){
+      return event.extendedProperties && event.extendedProperties.private &&
+        event.extendedProperties.private.fromGAS === "true";
+    }));
+    pageToken = eventPage.nextPageToken;
+  } while (pageToken);
+
+  var preview = dryRun !== false;
+  if (!preview) {
+    events.sort(function(a, b){ return Number(!!a.recurrence) - Number(!!b.recurrence); });
+    events.forEach(function(event){
+      var removed = callWithBackoff(function(){
+        Calendar.Events.remove(matches[0].id, event.id);
+        return true;
+      }, defaultMaxRetries);
+      if (!removed) throw new Error("Could not remove script-created event " + event.id);
+    });
+  }
+  Logger.log((preview ? "Would remove " : "Removed ") + events.length + " script-created events from " + targetName);
+  return {target: targetName, dryRun: preview, count: events.length};
+}
+
 // Per-calendar global variables (must be reset before processing each new calendar!)
 var calendarEvents = [];
 var calendarEventsIds = [];
 var icsEventsIds = [];
 var calendarEventsMD5s = [];
 var recurringEvents = [];
+var nativeExceptions = [];
 var targetCalendarId;
 var targetCalendarName;
 
@@ -157,22 +187,25 @@ function startSync(){
   //Disable email notification if no mail adress is provided
   emailSummary = emailSummary && email != "";
 
-  sourceCalendars = condenseCalendarMap(sourceCalendars);
-  for (var calendar of sourceCalendars){
+  var calendarGroups = condenseCalendarMap(sourceCalendars);
+  for (var calendar of calendarGroups){
     //------------------------ Reset globals ------------------------
     calendarEvents = [];
     calendarEventsIds = [];
     icsEventsIds = [];
     calendarEventsMD5s = [];
     recurringEvents = [];
+    nativeExceptions = [];
 
-    targetCalendarName = calendar[0];
-    var sourceCalendarURLs = calendar[1];
+    targetCalendarName = calendar.target;
+    var sourceCalendarURLs = calendar.sources;
     var vevents;
 
     //------------------------ Fetch URL items ------------------------
     var responses = fetchSourceCalendars(sourceCalendarURLs);
     Logger.log("Syncing " + responses.length + " calendars to " + targetCalendarName);
+    // A failed source must never make its existing target events look obsolete.
+    var sourceFetchFailed = responses.failed === true;
 
     //------------------------ Get target calendar information------------------------
     var targetCalendar = setupTargetCalendar(targetCalendarName);
@@ -204,8 +237,9 @@ function startSync(){
       }
 
       //------------------------ Parse ical events --------------------------
-      vevents = parseResponses(responses, icsEventsIds);
-      Logger.log("Parsed " + vevents.length + " events from ical sources");
+      vevents = parseResponses(responses);
+      sourceFetchFailed = responses.failed === true;
+      Logger.log("Parsed " + vevents.length + " events from sources");
     }
 
     //------------------------ Process ical events ------------------------
@@ -217,29 +251,33 @@ function startSync(){
         }, defaultMaxRetries);
 
       vevents.forEach(function(e){
-        processEvent(e, calendarTz);
+        if (e.nativeEvent) processNativeEvent(e);
+        else processICSEvent(e, calendarTz);
       });
 
       Logger.log("Done processing events");
     }
 
     //------------------------ Remove old events from calendar ------------------------
-    if(removeEventsFromCalendar){
+    if(removeEventsFromCalendar && !sourceFetchFailed && !reportOverallFailure){
       Logger.log("Checking " + calendarEvents.length + " events for removal");
       processEventCleanup();
       Logger.log("Done checking events for removal");
     }
+    else if (sourceFetchFailed || reportOverallFailure)
+      Logger.log("Skipping cleanup because a source could not be read or an event could not be saved");
 
     //------------------------ Process Tasks ------------------------
-    if (addTasks){
-      processTasks(responses);
+    if (addTasks && !sourceFetchFailed && responses.some(function(source){ return source.kind === "ics"; })){
+      processICSTasks(responses.filter(function(source){ return source.kind === "ics"; }));
     }
 
     //------------------------ Add Recurring Event Instances ------------------------
     Logger.log("Processing " + recurringEvents.length + " Recurrence Instances!");
     for (var recEvent of recurringEvents){
-      processEventInstance(recEvent);
+      processICSEventInstance(recEvent);
     }
+    processNativeExceptions();
   }
 
   if ((addedEvents.length + modifiedEvents.length + removedEvents.length) > 0 && emailSummary){

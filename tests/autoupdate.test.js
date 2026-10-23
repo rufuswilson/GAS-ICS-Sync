@@ -1,0 +1,138 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const code = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+const helpers = fs.readFileSync(path.join(__dirname, '..', 'Helpers.gs'), 'utf8');
+const repoApi = 'https://api.github.com/repos/rufuswilson/GAS-ICS-Sync';
+const projectApi = 'https://script.googleapis.com/v1/projects/project-id/content';
+const latest = {tag_name: 'v2.0', html_url: 'https://github.com/rufuswilson/GAS-ICS-Sync/releases/tag/v2.0'};
+const sources = {
+  'Code.gs': 'function startSync() {}',
+  'Helpers.gs': 'function AutoUpdate() {}',
+  'ical.js.gs': 'var ICAL = {};',
+  'tzid.gs': 'var tzid = {};',
+  'appsscript.json': JSON.stringify({runtimeVersion: 'V8', oauthScopes: []}),
+  'Config.gs': 'var sourceCalendars = [];',
+  'filters.gs': 'var filters = [];',
+};
+
+function setup(options = {}) {
+  const calls = [];
+  const writes = [];
+  const emails = [];
+  const properties = new Map();
+  const currentFiles = [
+    {name: 'Code', type: 'SERVER_JS', source: 'old code'},
+    {name: 'Config', type: 'SERVER_JS', source: 'private config'},
+    {name: 'filters', type: 'SERVER_JS', source: 'private filters'},
+    {name: 'appsscript', type: 'JSON', source: JSON.stringify({oauthScopes: ['old.scope']})},
+  ];
+  const response = (status, body) => ({
+    getResponseCode() { return status; },
+    getContentText() { return JSON.stringify(body); },
+  });
+  const context = vm.createContext({
+    Logger: {log() {}},
+    LockService: {getScriptLock() { return {tryLock() { return true; }, releaseLock() {}}; }},
+    PropertiesService: {getScriptProperties() { return {
+      getProperty(key) { return properties.get(key) || null; },
+      setProperty(key, value) { properties.set(key, value); },
+    }; }},
+    ScriptApp: {getScriptId() { return 'project-id'; }, getOAuthToken() { return 'token'; }},
+    MailApp: {sendEmail(...args) { emails.push(args); }},
+    Utilities: {
+      base64Decode(value) { return [...Buffer.from(value, 'base64')]; },
+      newBlob(value) { return {getDataAsString() { return Buffer.from(value).toString('utf8'); }}; },
+    },
+    UrlFetchApp: {fetch(url, params = {}) {
+      calls.push({url, params});
+      if (url === projectApi) {
+        if (params.method === 'put') {
+          writes.push(JSON.parse(params.payload));
+          return response(200, {});
+        }
+        return response(200, {files: currentFiles});
+      }
+      if (url === repoApi + '/releases/latest') return response(200, latest);
+      if (url === repoApi + '/branches/master')
+        return response(200, {commit: {sha: 'a'.repeat(40)}});
+      if (url.startsWith(repoApi + '/contents?ref='))
+        return response(200, Object.keys(sources).map(name => ({name, type: 'file'})));
+      const match = url.match(/\/contents\/([^?]+)\?ref=(.+)$/);
+      if (match && sources[decodeURIComponent(match[1])] !== undefined)
+        return response(200, {encoding: 'base64',
+          content: Buffer.from(sources[decodeURIComponent(match[1])]).toString('base64')});
+      return response(404, {});
+    }},
+  });
+  vm.runInContext(code, context);
+  vm.runInContext(helpers, context);
+  Object.assign(context, {
+    autoUpdateRepository: 'rufuswilson/GAS-ICS-Sync',
+    autoUpdateMode: options.mode || 'auto',
+    autoUpdateChannel: options.channel || 'release',
+    autoUpdateBranch: 'master',
+    email: 'person@example.com',
+  });
+  return {context, calls, writes, emails, properties, sources};
+}
+
+test('installs a pinned release while preserving private configuration', () => {
+  const s = setup();
+  s.context.AutoUpdate();
+  assert.equal(s.writes.length, 1);
+  const files = s.writes[0].files;
+  assert.equal(files.find(file => file.name === 'Config').source, 'private config');
+  assert.equal(files.find(file => file.name === 'filters').source, 'private filters');
+  assert.equal(files.find(file => file.name === 'Helpers').source, sources['Helpers.gs']);
+  const scopes = JSON.parse(files.find(file => file.name === 'appsscript').source).oauthScopes;
+  assert.ok(scopes.includes('old.scope'));
+  assert.ok(scopes.includes('https://www.googleapis.com/auth/script.projects'));
+  assert.ok(s.calls.filter(call => call.url.includes('/contents/')).every(call => call.url.endsWith('ref=v2.0')));
+  s.context.AutoUpdate();
+  assert.equal(s.writes.length, 1);
+});
+
+test('email mode sends one notice and does not write project content', () => {
+  const s = setup({mode: 'email'});
+  s.context.AutoUpdate();
+  s.context.AutoUpdate();
+  assert.equal(s.emails.length, 1);
+  assert.equal(s.writes.length, 0);
+  assert.ok(s.emails[0][2].includes(latest.html_url));
+});
+
+test('bleeding-edge pins a commit and rejects a release missing the updater', () => {
+  const s = setup({channel: 'bleeding-edge'});
+  s.context.AutoUpdate(true);
+  assert.equal(s.writes.length, 0);
+  assert.ok(s.calls.filter(call => call.url.includes('/contents/')).every(call => call.url.endsWith('ref=' + 'a'.repeat(40))));
+  s.sources['Helpers.gs'] = 'function helper() {}';
+  assert.throws(() => s.context.AutoUpdate(), /does not contain AutoUpdate/);
+  assert.equal(s.writes.length, 0);
+});
+
+test('old update trigger migrates once without touching sync triggers', () => {
+  const s = setup();
+  const legacy = {getHandlerFunction() { return 'checkForUpdate'; }};
+  const sync = {getHandlerFunction() { return 'startSync'; }};
+  const triggers = [legacy, sync];
+  const deleted = [];
+  s.context.ScriptApp.getProjectTriggers = () => triggers.slice();
+  s.context.ScriptApp.deleteTrigger = trigger => {
+    deleted.push(trigger);
+    triggers.splice(triggers.indexOf(trigger), 1);
+  };
+  s.context.ScriptApp.newTrigger = handler => ({timeBased() { return this; },
+    everyDays(days) { assert.equal(days, 1); return this; },
+    create() { triggers.push({getHandlerFunction() { return handler; }}); }});
+  s.context.checkForUpdate();
+  assert.deepEqual(deleted, [legacy]);
+  assert.deepEqual(triggers.map(trigger => trigger.getHandlerFunction()), ['startSync', 'AutoUpdate']);
+  assert.equal(s.calls.length, 0);
+  s.context.checkForUpdate();
+  assert.equal(triggers.length, 2);
+});
