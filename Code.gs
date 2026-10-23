@@ -96,12 +96,12 @@ function install() {
   }
 }
 
-function uninstall(){
+function uninstall() {
   deleteAllTriggers();
 }
 
 /** Run this from the Apps Script editor to preview an update without installing it. */
-function PreviewUpdate(){
+function PreviewUpdate() {
   return AutoUpdate(true);
 }
 
@@ -110,21 +110,21 @@ function PreviewUpdate(){
  * Call clearGASEvents("Target") to preview, then clearGASEvents("Target", false)
  * to delete. This does not create a calendar when the target is missing.
  */
-function clearGASEvents(targetName, dryRun){
-  if (!targetName || !condenseCalendarMap(sourceCalendars).some(function(group){ return group.target === targetName; }))
+function clearGASEvents(targetName, dryRun) {
+  if (!targetName || !condenseCalendarMap(sourceCalendars).some(function (group) { return group.target === targetName; }))
     throw new Error("Specify a configured target calendar name");
 
   var calendars = [];
   var pageToken;
   do {
-    var options = {showHidden: true, maxResults: 250};
+    var options = { showHidden: true, maxResults: 250 };
     if (pageToken) options.pageToken = pageToken;
-    var page = callWithBackoff(function(){ return Calendar.CalendarList.list(options); }, defaultMaxRetries);
+    var page = callWithBackoff(function () { return Calendar.CalendarList.list(options); }, defaultMaxRetries);
     if (!page) throw new Error("Could not list calendars");
     calendars = calendars.concat(page.items || []);
     pageToken = page.nextPageToken;
   } while (pageToken);
-  var matches = calendars.filter(function(calendar){
+  var matches = calendars.filter(function (calendar) {
     return (calendar.summaryOverride || calendar.summary) === targetName &&
       (calendar.accessRole === "owner" || calendar.accessRole === "writer");
   });
@@ -133,12 +133,14 @@ function clearGASEvents(targetName, dryRun){
   var events = [];
   pageToken = undefined;
   do {
-    var eventOptions = {maxResults: 2500, showDeleted: false, singleEvents: false,
-      privateExtendedProperty: "fromGAS=true"};
+    var eventOptions = {
+      maxResults: 2500, showDeleted: false, singleEvents: false,
+      privateExtendedProperty: "fromGAS=true"
+    };
     if (pageToken) eventOptions.pageToken = pageToken;
-    var eventPage = callWithBackoff(function(){ return Calendar.Events.list(matches[0].id, eventOptions); }, defaultMaxRetries);
+    var eventPage = callWithBackoff(function () { return Calendar.Events.list(matches[0].id, eventOptions); }, defaultMaxRetries);
     if (!eventPage) throw new Error("Could not list script-created events");
-    events = events.concat((eventPage.items || []).filter(function(event){
+    events = events.concat((eventPage.items || []).filter(function (event) {
       return event.extendedProperties && event.extendedProperties.private &&
         event.extendedProperties.private.fromGAS === "true";
     }));
@@ -147,9 +149,9 @@ function clearGASEvents(targetName, dryRun){
 
   var preview = dryRun !== false;
   if (!preview) {
-    events.sort(function(a, b){ return Number(!!a.recurrence) - Number(!!b.recurrence); });
-    events.forEach(function(event){
-      var removed = callWithBackoff(function(){
+    events.sort(function (a, b) { return Number(!!a.recurrence) - Number(!!b.recurrence); });
+    events.forEach(function (event) {
+      var removed = callWithBackoff(function () {
         Calendar.Events.remove(matches[0].id, event.id);
         return true;
       }, defaultMaxRetries);
@@ -157,7 +159,7 @@ function clearGASEvents(targetName, dryRun){
     });
   }
   Logger.log((preview ? "Would remove " : "Removed ") + events.length + " script-created events from " + targetName);
-  return {target: targetName, dryRun: preview, count: events.length};
+  return { target: targetName, dryRun: preview, count: events.length };
 }
 
 // Per-calendar global variables (must be reset before processing each new calendar!)
@@ -178,143 +180,143 @@ var removedEvents = [];
 // Syncing logic can set this to true to cause the Google Apps Script "Executions" dashboard to report failure
 var reportOverallFailure = false;
 
-function startSync(){
+function startSync() {
   var syncLock = LockService.getScriptLock();
   if (!syncLock.tryLock(1000)) {
     Logger.log("Another iteration is currently running! Exiting...");
     return;
   }
-  
+
   Logger.log("Run by user: " + currentUserEmail);
-  
+
   try {
 
-  //Disable email notification if no mail adress is provided
-  emailSummary = emailSummary && email != "";
+    //Disable email notification if no mail adress is provided
+    emailSummary = emailSummary && email != "";
 
-  var calendarGroups = condenseCalendarMap(sourceCalendars);
-  for (var calendar of calendarGroups){
-    //------------------------ Reset globals ------------------------
-    calendarEvents = [];
-    calendarEventsIds = [];
-    icsEventsIds = [];
-    icsEventSourceHashes = Object.create(null);
-    recurringEvents = [];
-    nativeExceptions = [];
+    var calendarGroups = condenseCalendarMap(sourceCalendars);
+    for (var calendar of calendarGroups) {
+      //------------------------ Reset globals ------------------------
+      calendarEvents = [];
+      calendarEventsIds = [];
+      icsEventsIds = [];
+      icsEventSourceHashes = Object.create(null);
+      recurringEvents = [];
+      nativeExceptions = [];
 
-    targetCalendarName = calendar.target;
-    var sourceCalendarURLs = calendar.sources;
-    var canAddOrModify = sourceCalendarURLs.some(function(source){
-      return sourceSetting(source, "addEventsToCalendar", addEventsToCalendar) ||
-        sourceSetting(source, "modifyExistingEvents", modifyExistingEvents);
-    });
-    var canRemove = sourceCalendarURLs.some(function(source){
-      return sourceSetting(source, "removeEventsFromCalendar", removeEventsFromCalendar);
-    });
-    var vevents;
-
-    //------------------------ Fetch URL items ------------------------
-    Logger.log("Fetching source calendars");
-    var responses = fetchSourceCalendars(sourceCalendarURLs);
-    Logger.log("Syncing " + responses.length + " calendars to " + targetCalendarName);
-    // A failed source must never make its existing target events look obsolete.
-    var sourceFetchFailed = responses.failed === true;
-
-    //------------------------ Get target calendar information------------------------
-    var targetCalendar = setupTargetCalendar(targetCalendarName, calendar.targetId,
-      calendar.createTargetCalendarIfMissing);
-    targetCalendarId = targetCalendar.id;
-    Logger.log("Working on calendar: " + targetCalendarId);
-
-    //------------------------ Parse existing events --------------------------
-    if(canAddOrModify || canRemove){
-      // Smaller pages avoid one very large Calendar API response for an old target.
-      var targetEventPageSize = 250;
-      Logger.log("Listing existing target events");
-      var eventList =
-        callWithBackoff(function(){
-            return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: targetEventPageSize});
-        }, defaultMaxRetries);
-      if (!eventList) throw new Error("Could not list target events for " + targetCalendarName);
-      calendarEvents = calendarEvents.concat((eventList.items || []).filter(function(event){ return event.status !== "cancelled"; }));
-      Logger.log("Listed " + calendarEvents.length + " active target events so far");
-      //loop until we received all events
-      var seenTargetPageTokens = Object.create(null);
-      while (eventList.nextPageToken){
-        if (seenTargetPageTokens[eventList.nextPageToken])
-          throw new Error("Repeated target-event page token for " + targetCalendarName);
-        seenTargetPageTokens[eventList.nextPageToken] = true;
-        eventList = callWithBackoff(function(){
-          return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: targetEventPageSize, pageToken: eventList.nextPageToken});
-        }, defaultMaxRetries);
-
-        if (!eventList) throw new Error("Could not list all target events for " + targetCalendarName);
-        calendarEvents = calendarEvents.concat((eventList.items || []).filter(function(event){ return event.status !== "cancelled"; }));
-        Logger.log("Listed " + calendarEvents.length + " active target events so far");
-      }
-      Logger.log("Fetched " + calendarEvents.length + " existing events from " + targetCalendarName);
-      for (var i = 0; i < calendarEvents.length; i++){
-        if (calendarEvents[i].extendedProperties != null){
-          var privateProperties = calendarEvents[i].extendedProperties.private || {};
-          calendarEventsIds[i] = privateProperties["rec-id"] || privateProperties["id"];
-        }
-      }
-
-      //------------------------ Parse ical events --------------------------
-      Logger.log("Parsing source events");
-      vevents = parseResponses(responses);
-      sourceFetchFailed = responses.failed === true;
-      Logger.log("Parsed " + vevents.length + " events from sources");
-    }
-
-    //------------------------ Process ical events ------------------------
-    if (canAddOrModify){
-      Logger.log("Processing " + vevents.length + " events");
-      var calendarTz =
-        callWithBackoff(function(){
-          return Calendar.Settings.get("timezone").value;
-        }, defaultMaxRetries);
-
-      vevents.forEach(function(e, index){
-        if (e.nativeEvent) processNativeEvent(e);
-        else processICSEvent(e, calendarTz);
-        if ((index + 1) % 100 === 0) Logger.log("Processed " + (index + 1) + " of " + vevents.length + " source events");
+      targetCalendarName = calendar.target;
+      var sourceCalendarURLs = calendar.sources;
+      var canAddOrModify = sourceCalendarURLs.some(function (source) {
+        return sourceSetting(source, "addEventsToCalendar", addEventsToCalendar) ||
+          sourceSetting(source, "modifyExistingEvents", modifyExistingEvents);
       });
+      var canRemove = sourceCalendarURLs.some(function (source) {
+        return sourceSetting(source, "removeEventsFromCalendar", removeEventsFromCalendar);
+      });
+      var vevents;
 
-      Logger.log("Done processing events");
+      //------------------------ Fetch URL items ------------------------
+      Logger.log("Fetching source calendars");
+      var responses = fetchSourceCalendars(sourceCalendarURLs);
+      Logger.log("Syncing " + responses.length + " calendars to " + targetCalendarName);
+      // A failed source must never make its existing target events look obsolete.
+      var sourceFetchFailed = responses.failed === true;
+
+      //------------------------ Get target calendar information------------------------
+      var targetCalendar = setupTargetCalendar(targetCalendarName, calendar.targetId,
+        calendar.createTargetCalendarIfMissing);
+      targetCalendarId = targetCalendar.id;
+      Logger.log("Working on calendar: " + targetCalendarId);
+
+      //------------------------ Parse existing events --------------------------
+      if (canAddOrModify || canRemove) {
+        // Smaller pages avoid one very large Calendar API response for an old target.
+        var targetEventPageSize = 250;
+        Logger.log("Listing existing target events");
+        var eventList =
+          callWithBackoff(function () {
+            return Calendar.Events.list(targetCalendarId, { showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: targetEventPageSize });
+          }, defaultMaxRetries);
+        if (!eventList) throw new Error("Could not list target events for " + targetCalendarName);
+        calendarEvents = calendarEvents.concat((eventList.items || []).filter(function (event) { return event.status !== "cancelled"; }));
+        Logger.log("Listed " + calendarEvents.length + " active target events so far");
+        //loop until we received all events
+        var seenTargetPageTokens = Object.create(null);
+        while (eventList.nextPageToken) {
+          if (seenTargetPageTokens[eventList.nextPageToken])
+            throw new Error("Repeated target-event page token for " + targetCalendarName);
+          seenTargetPageTokens[eventList.nextPageToken] = true;
+          eventList = callWithBackoff(function () {
+            return Calendar.Events.list(targetCalendarId, { showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: targetEventPageSize, pageToken: eventList.nextPageToken });
+          }, defaultMaxRetries);
+
+          if (!eventList) throw new Error("Could not list all target events for " + targetCalendarName);
+          calendarEvents = calendarEvents.concat((eventList.items || []).filter(function (event) { return event.status !== "cancelled"; }));
+          Logger.log("Listed " + calendarEvents.length + " active target events so far");
+        }
+        Logger.log("Fetched " + calendarEvents.length + " existing events from " + targetCalendarName);
+        for (var i = 0; i < calendarEvents.length; i++) {
+          if (calendarEvents[i].extendedProperties != null) {
+            var privateProperties = calendarEvents[i].extendedProperties.private || {};
+            calendarEventsIds[i] = privateProperties["rec-id"] || privateProperties["id"];
+          }
+        }
+
+        //------------------------ Parse ical events --------------------------
+        Logger.log("Parsing source events");
+        vevents = parseResponses(responses);
+        sourceFetchFailed = responses.failed === true;
+        Logger.log("Parsed " + vevents.length + " events from sources");
+      }
+
+      //------------------------ Process ical events ------------------------
+      if (canAddOrModify) {
+        Logger.log("Processing " + vevents.length + " events");
+        var calendarTz =
+          callWithBackoff(function () {
+            return Calendar.Settings.get("timezone").value;
+          }, defaultMaxRetries);
+
+        vevents.forEach(function (e, index) {
+          if (e.nativeEvent) processNativeEvent(e);
+          else processICSEvent(e, calendarTz);
+          if ((index + 1) % 100 === 0) Logger.log("Processed " + (index + 1) + " of " + vevents.length + " source events");
+        });
+
+        Logger.log("Done processing events");
+      }
+
+      //------------------------ Remove old events from calendar ------------------------
+      if (canRemove && !sourceFetchFailed && !reportOverallFailure) {
+        Logger.log("Checking " + calendarEvents.length + " events for removal");
+        processEventCleanup(sourceCalendarURLs);
+        Logger.log("Done checking events for removal");
+      }
+      else if (sourceFetchFailed || reportOverallFailure)
+        Logger.log("Skipping cleanup because a source could not be read or an event could not be saved");
+
+      //------------------------ Process Tasks ------------------------
+      if (addTasks && !sourceFetchFailed && responses.some(function (source) { return source.kind === "ics"; })) {
+        processICSTasks(responses.filter(function (source) { return source.kind === "ics"; }));
+      }
+
+      //------------------------ Add Recurring Event Instances ------------------------
+      Logger.log("Processing " + recurringEvents.length + " Recurrence Instances!");
+      for (var recEvent of recurringEvents) {
+        processICSEventInstance(recEvent.event, recEvent.settings);
+      }
+      processNativeExceptions();
     }
 
-    //------------------------ Remove old events from calendar ------------------------
-    if(canRemove && !sourceFetchFailed && !reportOverallFailure){
-      Logger.log("Checking " + calendarEvents.length + " events for removal");
-      processEventCleanup(sourceCalendarURLs);
-      Logger.log("Done checking events for removal");
+    if ((addedEvents.length + modifiedEvents.length + removedEvents.length) > 0 && emailSummary) {
+      sendSummary();
     }
-    else if (sourceFetchFailed || reportOverallFailure)
-      Logger.log("Skipping cleanup because a source could not be read or an event could not be saved");
-
-    //------------------------ Process Tasks ------------------------
-    if (addTasks && !sourceFetchFailed && responses.some(function(source){ return source.kind === "ics"; })){
-      processICSTasks(responses.filter(function(source){ return source.kind === "ics"; }));
+    Logger.log("Sync finished!");
+    if (reportOverallFailure) {
+      // Cause the Google Apps Script "Executions" dashboard to show a failure
+      // (the message text does not seem to be logged anywhere)
+      throw new Error('The sync operation produced errors. See log for details.');
     }
-
-    //------------------------ Add Recurring Event Instances ------------------------
-    Logger.log("Processing " + recurringEvents.length + " Recurrence Instances!");
-    for (var recEvent of recurringEvents){
-      processICSEventInstance(recEvent.event, recEvent.settings);
-    }
-    processNativeExceptions();
-  }
-
-  if ((addedEvents.length + modifiedEvents.length + removedEvents.length) > 0 && emailSummary){
-    sendSummary();
-  }
-  Logger.log("Sync finished!");
-  if (reportOverallFailure) {
-    // Cause the Google Apps Script "Executions" dashboard to show a failure
-    // (the message text does not seem to be logged anywhere)
-    throw new Error('The sync operation produced errors. See log for details.');
-  }
   } finally {
     syncLock.releaseLock();
   }

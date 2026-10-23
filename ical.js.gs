@@ -4,9 +4,10 @@
  * Portions Copyright (C) Philipp Kewisch */
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
-  typeof define === 'function' && define.amd ? define(factory) :
-  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, global.ICAL = factory());
-})(this, (function () { 'use strict';
+    typeof define === 'function' && define.amd ? define(factory) :
+      (global = typeof globalThis !== 'undefined' ? globalThis : global || self, global.ICAL = factory());
+})(this, (function () {
+  'use strict';
 
   function _assertClassBrand(e, t, n) {
     if ("function" == typeof e ? e === t : e.has(t)) return arguments.length < 3 ? t : n;
@@ -24,8 +25,8 @@
   }
   function _isNativeReflectConstruct() {
     try {
-      var t = !Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {}));
-    } catch (t) {}
+      var t = !Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () { }));
+    } catch (t) { }
     return (_isNativeReflectConstruct = function () {
       return !!t;
     })();
@@ -220,7 +221,7 @@
       if (Array.isArray(o) || (it = _unsupportedIterableToArray(o)) || allowArrayLike && o && typeof o.length === "number") {
         if (it) o = it;
         var i = 0;
-        var F = function () {};
+        var F = function () { };
         return {
           s: F,
           n: function () {
@@ -295,14 +296,14 @@
     return _createClass(Binary, [{
       key: "decodeValue",
       value:
-      /**
-       * Base64 decode the current value
-       *
-       * @return {String}         The base64-decoded value
-       */
-      function decodeValue() {
-        return this._b64_decode(this.value);
-      }
+        /**
+         * Base64 decode the current value
+         *
+         * @return {String}         The base64-decoded value
+         */
+        function decodeValue() {
+          return this._b64_decode(this.value);
+        }
 
       /**
        * Encodes the passed parameter with base64 and sets the internal
@@ -438,15 +439,15 @@
     }], [{
       key: "fromString",
       value:
-      /**
-       * Creates a binary value from the given string.
-       *
-       * @param {String} aString        The binary value string
-       * @return {ICAL.Binary}          The binary value instance
-       */
-      function fromString(aString) {
-        return new Binary(aString);
-      }
+        /**
+         * Creates a binary value from the given string.
+         *
+         * @param {String} aString        The binary value string
+         * @return {ICAL.Binary}          The binary value instance
+         */
+        function fromString(aString) {
+          return new Binary(aString);
+        }
     }]);
   }();
 
@@ -530,14 +531,14 @@
     return _createClass(Duration, [{
       key: "clone",
       value:
-      /**
-       * Returns a clone of the duration object.
-       *
-       * @return {ICAL.Duration}      The cloned object
-       */
-      function clone() {
-        return Duration.fromData(this);
-      }
+        /**
+         * Returns a clone of the duration object.
+         *
+         * @return {ICAL.Duration}      The cloned object
+         */
+        function clone() {
+          return Duration.fromData(this);
+        }
 
       /**
        * The duration value expressed as a number of seconds.
@@ -681,15 +682,15 @@
     }], [{
       key: "fromSeconds",
       value:
-      /**
-       * Returns a new ICAL.Duration instance from the passed seconds value.
-       *
-       * @param {Number} aSeconds       The seconds to create the instance from
-       * @return {ICAL.Duration}        The newly created duration instance
-       */
-      function fromSeconds(aSeconds) {
-        return new Duration().fromSeconds(aSeconds);
-      }
+        /**
+         * Returns a new ICAL.Duration instance from the passed seconds value.
+         *
+         * @param {Number} aSeconds       The seconds to create the instance from
+         * @return {ICAL.Duration}        The newly created duration instance
+         */
+        function fromSeconds(aSeconds) {
+          return new Duration().fromSeconds(aSeconds);
+        }
 
       /**
        * Checks if the given string is an iCalendar duration value.
@@ -879,27 +880,27 @@
     return _createClass(Time, [{
       key: "icaltype",
       get:
-      /**
-       * The type name, to be used in the jCal object. This value may change and
-       * is strictly defined by the {@link ICAL.Time#isDate isDate} member.
-       * @readonly
-       * @type {String}
-       * @default "date-time"
-       */
-      function get() {
-        return this.isDate ? 'date' : 'date-time';
-      }
+        /**
+         * The type name, to be used in the jCal object. This value may change and
+         * is strictly defined by the {@link ICAL.Time#isDate isDate} member.
+         * @readonly
+         * @type {String}
+         * @default "date-time"
+         */
+        function get() {
+          return this.isDate ? 'date' : 'date-time';
+        }
     }, {
       key: "clone",
       value:
-      /**
-       * Returns a clone of the time object.
-       *
-       * @return {ICAL.Time}              The cloned object
-       */
-      function clone() {
-        return new Time(this._time, this.zone);
-      }
+        /**
+         * Returns a clone of the time object.
+         *
+         * @return {ICAL.Time}              The cloned object
+         */
+        function clone() {
+          return new Time(this._time, this.zone);
+        }
 
       /**
        * Reset the time instance to epoch time
@@ -1615,7 +1616,7 @@
         // Now take care of the days (and adjust month if needed)
         day = time.day + aExtraDays + daysOverflow;
         if (day > 0) {
-          for (;;) {
+          for (; ;) {
             daysInMonth = Time.daysInMonth(time.month, time.year);
             if (day <= daysInMonth) {
               break;
@@ -1728,23 +1729,23 @@
     }], [{
       key: "daysInMonth",
       value:
-      /**
-       * Returns the days in the given month
-       *
-       * @param {Number} month      The month to check
-       * @param {Number} year       The year to check
-       * @return {Number}           The number of days in the month
-       */
-      function daysInMonth(month, year) {
-        var _daysInMonth = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        var days = 30;
-        if (month < 1 || month > 12) return days;
-        days = _daysInMonth[month];
-        if (month == 2) {
-          days += Time.isLeapYear(year);
+        /**
+         * Returns the days in the given month
+         *
+         * @param {Number} month      The month to check
+         * @param {Number} year       The year to check
+         * @return {Number}           The number of days in the month
+         */
+        function daysInMonth(month, year) {
+          var _daysInMonth = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+          var days = 30;
+          if (month < 1 || month > 12) return days;
+          days = _daysInMonth[month];
+          if (month == 2) {
+            days += Time.isLeapYear(year);
+          }
+          return days;
         }
-        return days;
-      }
 
       /**
        * Checks if the year is a leap year
@@ -1944,16 +1945,16 @@
     }, {
       key: "now",
       value:
-      /**
-       * Creates a new ICAL.Time instance from the current moment.
-       * The instance is “floating” - has no timezone relation.
-       * To create an instance considering the time zone, call
-       * ICAL.Time.fromJSDate(new Date(), true)
-       * @return {ICAL.Time}
-       */
-      function now() {
-        return Time.fromJSDate(new Date(), false);
-      }
+        /**
+         * Creates a new ICAL.Time instance from the current moment.
+         * The instance is “floating” - has no timezone relation.
+         * To create an instance considering the time zone, call
+         * ICAL.Time.fromJSDate(new Date(), true)
+         * @return {ICAL.Time}
+         */
+        function now() {
+          return Time.fromJSDate(new Date(), false);
+        }
 
       /**
        * Returns the date on which ISO week number 1 starts.
@@ -2006,27 +2007,27 @@
     }, {
       key: "epochTime",
       get:
-      /**
-       * January 1st, 1970 as an ICAL.Time.
-       * @type {ICAL.Time}
-       * @constant
-       * @instance
-       */
-      function get() {
-        if (!_assertClassBrand(Time, this, _epochTime)._) {
-          _epochTime._ = _assertClassBrand(Time, this, Time.fromData({
-            year: 1970,
-            month: 1,
-            day: 1,
-            hour: 0,
-            minute: 0,
-            second: 0,
-            isDate: false,
-            timezone: "Z"
-          }));
+        /**
+         * January 1st, 1970 as an ICAL.Time.
+         * @type {ICAL.Time}
+         * @constant
+         * @instance
+         */
+        function get() {
+          if (!_assertClassBrand(Time, this, _epochTime)._) {
+            _epochTime._ = _assertClassBrand(Time, this, Time.fromData({
+              year: 1970,
+              month: 1,
+              day: 1,
+              hour: 0,
+              minute: 0,
+              second: 0,
+              isDate: false,
+              timezone: "Z"
+            }));
+          }
+          return _assertClassBrand(Time, this, _epochTime)._;
         }
-        return _assertClassBrand(Time, this, _epochTime)._;
-      }
     }, {
       key: "_cmp_attr",
       value: function _cmp_attr(a, b, attr) {
@@ -2316,7 +2317,7 @@
        */
       Logger.log(`ParserError(invalid line (no token ";" or ":") "${line}")`);
       return;
-      }
+    }
     var valueType;
     var multiValue = false;
     var structuredValue = false;
@@ -2708,59 +2709,59 @@
     return _createClass(Timezone, [{
       key: "fromData",
       value:
-      /**
-       * Sets up the current instance using members from the passed data object.
-       *
-       * @param {ICAL.Component|Object} aData options for class
-       * @param {String|ICAL.Component} aData.component
-       *        If aData is a simple object, then this member can be set to either a
-       *        string containing the component data, or an already parsed
-       *        ICAL.Component
-       * @param {String} aData.tzid      The timezone identifier
-       * @param {String} aData.location  The timezone locationw
-       * @param {String} aData.tznames   An alternative string representation of the
-       *                                  timezone
-       * @param {Number} aData.latitude  The latitude of the timezone
-       * @param {Number} aData.longitude The longitude of the timezone
-       */
-      function fromData(aData) {
-        this.expandedUntilYear = 0;
-        this.changes = [];
-        if (aData instanceof Component) {
-          // Either a component is passed directly
-          this.component = aData;
-        } else {
-          // Otherwise the component may be in the data object
-          if (aData && "component" in aData) {
-            if (typeof aData.component == "string") {
-              // If a string was passed, parse it as a component
-              var jCal = parse(aData.component);
-              this.component = new Component(jCal);
-            } else if (aData.component instanceof Component) {
-              // If it was a component already, then just set it
-              this.component = aData.component;
-            } else {
-              // Otherwise just null out the component
-              this.component = null;
+        /**
+         * Sets up the current instance using members from the passed data object.
+         *
+         * @param {ICAL.Component|Object} aData options for class
+         * @param {String|ICAL.Component} aData.component
+         *        If aData is a simple object, then this member can be set to either a
+         *        string containing the component data, or an already parsed
+         *        ICAL.Component
+         * @param {String} aData.tzid      The timezone identifier
+         * @param {String} aData.location  The timezone locationw
+         * @param {String} aData.tznames   An alternative string representation of the
+         *                                  timezone
+         * @param {Number} aData.latitude  The latitude of the timezone
+         * @param {Number} aData.longitude The longitude of the timezone
+         */
+        function fromData(aData) {
+          this.expandedUntilYear = 0;
+          this.changes = [];
+          if (aData instanceof Component) {
+            // Either a component is passed directly
+            this.component = aData;
+          } else {
+            // Otherwise the component may be in the data object
+            if (aData && "component" in aData) {
+              if (typeof aData.component == "string") {
+                // If a string was passed, parse it as a component
+                var jCal = parse(aData.component);
+                this.component = new Component(jCal);
+              } else if (aData.component instanceof Component) {
+                // If it was a component already, then just set it
+                this.component = aData.component;
+              } else {
+                // Otherwise just null out the component
+                this.component = null;
+              }
+            }
+
+            // Copy remaining passed properties
+            for (var _i = 0, _OPTIONS = OPTIONS; _i < _OPTIONS.length; _i++) {
+              var prop = _OPTIONS[_i];
+              if (aData && prop in aData) {
+                this[prop] = aData[prop];
+              }
             }
           }
 
-          // Copy remaining passed properties
-          for (var _i = 0, _OPTIONS = OPTIONS; _i < _OPTIONS.length; _i++) {
-            var prop = _OPTIONS[_i];
-            if (aData && prop in aData) {
-              this[prop] = aData[prop];
-            }
+          // If we have a component but no TZID, attempt to get it from the
+          // component's properties.
+          if (this.component instanceof Component && !this.tzid) {
+            this.tzid = this.component.getFirstPropertyValue('tzid');
           }
+          return this;
         }
-
-        // If we have a component but no TZID, attempt to get it from the
-        // component's properties.
-        if (this.component instanceof Component && !this.tzid) {
-          this.tzid = this.component.getFirstPropertyValue('tzid');
-        }
-        return this;
-      }
 
       /**
        * Finds the utcOffset the given time would occur in this timezone.
@@ -2791,7 +2792,7 @@
         var step = 1;
 
         // TODO: replace with bin search?
-        for (;;) {
+        for (; ;) {
           var change = clone(this.changes[change_num], true);
           if (change.utcOffset < change.prevUtcOffset) {
             Timezone.adjust_change(change, 0, 0, 0, change.utcOffset);
@@ -2970,12 +2971,12 @@
     }], [{
       key: "_compare_change_fn",
       value: function _compare_change_fn(a, b) {
-        if (a.year < b.year) return -1;else if (a.year > b.year) return 1;
-        if (a.month < b.month) return -1;else if (a.month > b.month) return 1;
-        if (a.day < b.day) return -1;else if (a.day > b.day) return 1;
-        if (a.hour < b.hour) return -1;else if (a.hour > b.hour) return 1;
-        if (a.minute < b.minute) return -1;else if (a.minute > b.minute) return 1;
-        if (a.second < b.second) return -1;else if (a.second > b.second) return 1;
+        if (a.year < b.year) return -1; else if (a.year > b.year) return 1;
+        if (a.month < b.month) return -1; else if (a.month > b.month) return 1;
+        if (a.day < b.day) return -1; else if (a.day > b.day) return 1;
+        if (a.hour < b.hour) return -1; else if (a.hour > b.hour) return 1;
+        if (a.minute < b.minute) return -1; else if (a.minute > b.minute) return 1;
+        if (a.second < b.second) return -1; else if (a.second > b.second) return 1;
         return 0;
       }
 
@@ -3331,10 +3332,10 @@
     while (low <= high) {
       mid = low + Math.floor((high - low) / 2);
       cmpval = cmpfunc(seekVal, list[mid]);
-      if (cmpval < 0) high = mid - 1;else if (cmpval > 0) low = mid + 1;else break;
+      if (cmpval < 0) high = mid - 1; else if (cmpval > 0) low = mid + 1; else break;
     }
     if (cmpval < 0) return mid; // insertion is displacing, so use mid outright.
-    else if (cmpval > 0) return mid + 1;else return mid;
+    else if (cmpval > 0) return mid + 1; else return mid;
   }
 
   /**
@@ -3394,9 +3395,9 @@
     //line_length counts the bytes for the UTF-8 presentation
     while (line.length) {
       var cp = line.codePointAt(pos);
-      if (cp < 128) ++line_length;else if (cp < 2048) line_length += 2; //needs 2 UTF-8 bytes
-      else if (cp < 65536) line_length += 3;else line_length += 4; //cp is less than 1114112
-      if (line_length < ICALmodule.foldLength + 1) pos += cp > 65535 ? 2 : 1;else {
+      if (cp < 128) ++line_length; else if (cp < 2048) line_length += 2; //needs 2 UTF-8 bytes
+      else if (cp < 65536) line_length += 3; else line_length += 4; //cp is less than 1114112
+      if (line_length < ICALmodule.foldLength + 1) pos += cp > 65535 ? 2 : 1; else {
         result += ICALmodule.newLineChar + " " + line.slice(0, Math.max(0, pos));
         line = line.slice(Math.max(0, pos));
         pos = line_length = 0;
@@ -3526,14 +3527,14 @@
     return _createClass(UtcOffset, [{
       key: "clone",
       value:
-      /**
-       * Returns a clone of the utc offset object.
-       *
-       * @return {ICAL.UtcOffset}     The cloned object
-       */
-      function clone() {
-        return UtcOffset.fromSeconds(this.toSeconds());
-      }
+        /**
+         * Returns a clone of the utc offset object.
+         *
+         * @return {ICAL.UtcOffset}     The cloned object
+         */
+        function clone() {
+          return UtcOffset.fromSeconds(this.toSeconds());
+        }
 
       /**
        * Sets up the current instance using members from the passed data object.
@@ -3643,21 +3644,21 @@
     }], [{
       key: "fromString",
       value:
-      /**
-       * Creates a new {@link ICAL.UtcOffset} instance from the passed string.
-       *
-       * @param {String} aString    The string to parse
-       * @return {ICAL.Duration}    The created utc-offset instance
-       */
-      function fromString(aString) {
-        // -05:00
-        var options = {};
-        //TODO: support seconds per rfc5545 ?
-        options.factor = aString[0] === '+' ? 1 : -1;
-        options.hours = strictParseInt(aString.slice(1, 3));
-        options.minutes = strictParseInt(aString.slice(4, 6));
-        return new UtcOffset(options);
-      }
+        /**
+         * Creates a new {@link ICAL.UtcOffset} instance from the passed string.
+         *
+         * @param {String} aString    The string to parse
+         * @return {ICAL.Duration}    The created utc-offset instance
+         */
+        function fromString(aString) {
+          // -05:00
+          var options = {};
+          //TODO: support seconds per rfc5545 ?
+          options.factor = aString[0] === '+' ? 1 : -1;
+          options.hours = strictParseInt(aString.slice(1, 3));
+          options.minutes = strictParseInt(aString.slice(4, 6));
+          return new UtcOffset(options);
+        }
 
       /**
        * Creates a new {@link ICAL.UtcOffset} instance from the passed seconds
@@ -3728,14 +3729,14 @@
     return _createClass(VCardTime, [{
       key: "clone",
       value:
-      /**
-       * Returns a clone of the vcard date/time object.
-       *
-       * @return {ICAL.VCardTime}     The cloned object
-       */
-      function clone() {
-        return new VCardTime(this._time, this.zone, this.icaltype);
-      }
+        /**
+         * Returns a clone of the vcard date/time object.
+         *
+         * @return {ICAL.VCardTime}     The cloned object
+         */
+        function clone() {
+          return new VCardTime(this._time, this.zone, this.icaltype);
+        }
     }, {
       key: "_normalize",
       value: function _normalize() {
@@ -3815,44 +3816,44 @@
     }], [{
       key: "fromDateAndOrTimeString",
       value:
-      /**
-       * Returns a new ICAL.VCardTime instance from a date and/or time string.
-       *
-       * @param {String} aValue     The string to create from
-       * @param {String} aIcalType  The type for this instance, e.g. date-and-or-time
-       * @return {ICAL.VCardTime}   The date/time instance
-       */
-      function fromDateAndOrTimeString(aValue, aIcalType) {
-        function part(v, s, e) {
-          return v ? strictParseInt(v.slice(s, s + e)) : null;
+        /**
+         * Returns a new ICAL.VCardTime instance from a date and/or time string.
+         *
+         * @param {String} aValue     The string to create from
+         * @param {String} aIcalType  The type for this instance, e.g. date-and-or-time
+         * @return {ICAL.VCardTime}   The date/time instance
+         */
+        function fromDateAndOrTimeString(aValue, aIcalType) {
+          function part(v, s, e) {
+            return v ? strictParseInt(v.slice(s, s + e)) : null;
+          }
+          var parts = aValue.split('T');
+          var dt = parts[0],
+            tmz = parts[1];
+          var splitzone = tmz ? design.vcard.value.time._splitZone(tmz) : [];
+          var zone = splitzone[0],
+            tm = splitzone[1];
+          var dtlen = dt ? dt.length : 0;
+          var tmlen = tm ? tm.length : 0;
+          var hasDashDate = dt && dt[0] == '-' && dt[1] == '-';
+          var hasDashTime = tm && tm[0] == '-';
+          var o = {
+            year: hasDashDate ? null : part(dt, 0, 4),
+            month: hasDashDate && (dtlen == 4 || dtlen == 7) ? part(dt, 2, 2) : dtlen == 7 ? part(dt, 5, 2) : dtlen == 10 ? part(dt, 5, 2) : null,
+            day: dtlen == 5 ? part(dt, 3, 2) : dtlen == 7 && hasDashDate ? part(dt, 5, 2) : dtlen == 10 ? part(dt, 8, 2) : null,
+            hour: hasDashTime ? null : part(tm, 0, 2),
+            minute: hasDashTime && tmlen == 3 ? part(tm, 1, 2) : tmlen > 4 ? hasDashTime ? part(tm, 1, 2) : part(tm, 3, 2) : null,
+            second: tmlen == 4 ? part(tm, 2, 2) : tmlen == 6 ? part(tm, 4, 2) : tmlen == 8 ? part(tm, 6, 2) : null
+          };
+          if (zone == 'Z') {
+            zone = Timezone.utcTimezone;
+          } else if (zone && zone[3] == ':') {
+            zone = UtcOffset.fromString(zone);
+          } else {
+            zone = null;
+          }
+          return new VCardTime(o, zone, aIcalType);
         }
-        var parts = aValue.split('T');
-        var dt = parts[0],
-          tmz = parts[1];
-        var splitzone = tmz ? design.vcard.value.time._splitZone(tmz) : [];
-        var zone = splitzone[0],
-          tm = splitzone[1];
-        var dtlen = dt ? dt.length : 0;
-        var tmlen = tm ? tm.length : 0;
-        var hasDashDate = dt && dt[0] == '-' && dt[1] == '-';
-        var hasDashTime = tm && tm[0] == '-';
-        var o = {
-          year: hasDashDate ? null : part(dt, 0, 4),
-          month: hasDashDate && (dtlen == 4 || dtlen == 7) ? part(dt, 2, 2) : dtlen == 7 ? part(dt, 5, 2) : dtlen == 10 ? part(dt, 5, 2) : null,
-          day: dtlen == 5 ? part(dt, 3, 2) : dtlen == 7 && hasDashDate ? part(dt, 5, 2) : dtlen == 10 ? part(dt, 8, 2) : null,
-          hour: hasDashTime ? null : part(tm, 0, 2),
-          minute: hasDashTime && tmlen == 3 ? part(tm, 1, 2) : tmlen > 4 ? hasDashTime ? part(tm, 1, 2) : part(tm, 3, 2) : null,
-          second: tmlen == 4 ? part(tm, 2, 2) : tmlen == 6 ? part(tm, 4, 2) : tmlen == 8 ? part(tm, 6, 2) : null
-        };
-        if (zone == 'Z') {
-          zone = Timezone.utcTimezone;
-        } else if (zone && zone[3] == ':') {
-          zone = UtcOffset.fromString(zone);
-        } else {
-          zone = null;
-        }
-        return new VCardTime(o, zone, aIcalType);
-      }
     }]);
   }(Time);
 
@@ -3938,54 +3939,54 @@
     return _createClass(RecurIterator, [{
       key: "fromData",
       value:
-      /**
-       * Initialize the recurrence iterator from the passed data object. This
-       * method is usually not called directly, you can initialize the iterator
-       * through the constructor.
-       *
-       * @param {Object} options                The iterator options
-       * @param {ICAL.Recur} options.rule       The rule to iterate.
-       * @param {ICAL.Time} options.dtstart     The start date of the event.
-       * @param {Boolean=} options.initialized  When true, assume that options are
-       *        from a previously constructed iterator. Initialization will not be
-       *        repeated.
-       */
-      function fromData(options) {
-        this.rule = formatClassType(options.rule, Recur);
-        if (!this.rule) {
-          throw new Error('iterator requires a (ICAL.Recur) rule');
+        /**
+         * Initialize the recurrence iterator from the passed data object. This
+         * method is usually not called directly, you can initialize the iterator
+         * through the constructor.
+         *
+         * @param {Object} options                The iterator options
+         * @param {ICAL.Recur} options.rule       The rule to iterate.
+         * @param {ICAL.Time} options.dtstart     The start date of the event.
+         * @param {Boolean=} options.initialized  When true, assume that options are
+         *        from a previously constructed iterator. Initialization will not be
+         *        repeated.
+         */
+        function fromData(options) {
+          this.rule = formatClassType(options.rule, Recur);
+          if (!this.rule) {
+            throw new Error('iterator requires a (ICAL.Recur) rule');
+          }
+          this.dtstart = formatClassType(options.dtstart, Time);
+          if (!this.dtstart) {
+            throw new Error('iterator requires a (ICAL.Time) dtstart');
+          }
+          if (options.by_data) {
+            this.by_data = options.by_data;
+          } else {
+            this.by_data = clone(this.rule.parts, true);
+          }
+          if (options.occurrence_number) this.occurrence_number = options.occurrence_number;
+          this.days = options.days || [];
+          if (options.last) {
+            this.last = formatClassType(options.last, Time);
+          }
+          this.by_indices = options.by_indices;
+          if (!this.by_indices) {
+            this.by_indices = {
+              "BYSECOND": 0,
+              "BYMINUTE": 0,
+              "BYHOUR": 0,
+              "BYDAY": 0,
+              "BYMONTH": 0,
+              "BYWEEKNO": 0,
+              "BYMONTHDAY": 0
+            };
+          }
+          this.initialized = options.initialized || false;
+          if (!this.initialized) {
+            this.init();
+          }
         }
-        this.dtstart = formatClassType(options.dtstart, Time);
-        if (!this.dtstart) {
-          throw new Error('iterator requires a (ICAL.Time) dtstart');
-        }
-        if (options.by_data) {
-          this.by_data = options.by_data;
-        } else {
-          this.by_data = clone(this.rule.parts, true);
-        }
-        if (options.occurrence_number) this.occurrence_number = options.occurrence_number;
-        this.days = options.days || [];
-        if (options.last) {
-          this.last = formatClassType(options.last, Time);
-        }
-        this.by_indices = options.by_indices;
-        if (!this.by_indices) {
-          this.by_indices = {
-            "BYSECOND": 0,
-            "BYMINUTE": 0,
-            "BYHOUR": 0,
-            "BYDAY": 0,
-            "BYMONTH": 0,
-            "BYWEEKNO": 0,
-            "BYMONTHDAY": 0
-          };
-        }
-        this.initialized = options.initialized || false;
-        if (!this.initialized) {
-          this.init();
-        }
-      }
 
       /**
        * Initialize the iterator
@@ -4052,7 +4053,7 @@
           }
         }
         if (this.rule.freq == "YEARLY") {
-          for (;;) {
+          for (; ;) {
             this.expand_year_days(this.last.year);
             if (this.days.length > 0) {
               break;
@@ -4544,7 +4545,7 @@
         if (!this.has_by_data("BYDAY")) {
           return 1;
         }
-        for (;;) {
+        for (; ;) {
           var tt = new Time();
           this.by_indices.BYDAY++;
           if (this.by_indices.BYDAY == Object.keys(this.by_data.BYDAY).length) {
@@ -4835,7 +4836,7 @@
           } finally {
             _iterator4.f();
           }
-        } else if (partCount == 1 && "BYWEEKNO" in parts) ; else if (partCount == 2 && "BYWEEKNO" in parts && "BYMONTHDAY" in parts) ; else if (partCount == 1 && "BYDAY" in parts) {
+        } else if (partCount == 1 && "BYWEEKNO" in parts); else if (partCount == 2 && "BYWEEKNO" in parts && "BYMONTHDAY" in parts); else if (partCount == 1 && "BYDAY" in parts) {
           this.days = this.days.concat(this.expand_by_day(aYear));
         } else if (partCount == 2 && "BYDAY" in parts && "BYMONTH" in parts) {
           var _iterator6 = _createForOfIteratorHelper(this.by_data.BYMONTH),
@@ -4962,7 +4963,7 @@
           } finally {
             _iterator10.f();
           }
-        } else if (partCount == 3 && "BYDAY" in parts && "BYWEEKNO" in parts && "BYMONTHDAY" in parts) ; else if (partCount == 1 && "BYYEARDAY" in parts) {
+        } else if (partCount == 3 && "BYDAY" in parts && "BYWEEKNO" in parts && "BYMONTHDAY" in parts); else if (partCount == 1 && "BYYEARDAY" in parts) {
           this.days = this.days.concat(this.by_data.BYYEARDAY);
         } else {
           this.days = [];
@@ -5291,31 +5292,31 @@
     return _createClass(Recur, [{
       key: "iterator",
       value:
-      /**
-       * Create a new iterator for this recurrence rule. The passed start date
-       * must be the start date of the event, not the start of the range to
-       * search in.
-       *
-       * @example
-       * let recur = comp.getFirstPropertyValue('rrule');
-       * let dtstart = comp.getFirstPropertyValue('dtstart');
-       * let iter = recur.iterator(dtstart);
-       * for (let next = iter.next(); next; next = iter.next()) {
-       *   if (next.compare(rangeStart) < 0) {
-       *     continue;
-       *   }
-       *   console.log(next.toString());
-       * }
-       *
-       * @param {ICAL.Time} aStart        The item's start date
-       * @return {ICAL.RecurIterator}     The recurrence iterator
-       */
-      function iterator(aStart) {
-        return new RecurIterator({
-          rule: this,
-          dtstart: aStart
-        });
-      }
+        /**
+         * Create a new iterator for this recurrence rule. The passed start date
+         * must be the start date of the event, not the start of the range to
+         * search in.
+         *
+         * @example
+         * let recur = comp.getFirstPropertyValue('rrule');
+         * let dtstart = comp.getFirstPropertyValue('dtstart');
+         * let iter = recur.iterator(dtstart);
+         * for (let next = iter.next(); next; next = iter.next()) {
+         *   if (next.compare(rangeStart) < 0) {
+         *     continue;
+         *   }
+         *   console.log(next.toString());
+         * }
+         *
+         * @param {ICAL.Time} aStart        The item's start date
+         * @return {ICAL.RecurIterator}     The recurrence iterator
+         */
+        function iterator(aStart) {
+          return new RecurIterator({
+            rule: this,
+            dtstart: aStart
+          });
+        }
 
       /**
        * Returns a clone of the recurrence object.
@@ -5534,16 +5535,16 @@
     }], [{
       key: "fromString",
       value:
-      /**
-       * Creates a new {@link ICAL.Recur} instance from the passed string.
-       *
-       * @param {String} string         The string to parse
-       * @return {ICAL.Recur}           The created recurrence instance
-       */
-      function fromString(string) {
-        var data = this._stringToData(string, false);
-        return new Recur(data);
-      }
+        /**
+         * Creates a new {@link ICAL.Recur} instance from the passed string.
+         *
+         * @param {String} string         The string to parse
+         * @return {ICAL.Recur}           The created recurrence instance
+         */
+        function fromString(string) {
+          var data = this._stringToData(string, false);
+          return new Recur(data);
+        }
 
       /**
        * Creates a new {@link ICAL.Recur} instance using members from the passed
@@ -5799,18 +5800,18 @@
     return _createClass(Period, [{
       key: "clone",
       value:
-      /**
-       * Returns a clone of the duration object.
-       *
-       * @return {ICAL.Period}      The cloned object
-       */
-      function clone() {
-        return Period.fromData({
-          start: this.start ? this.start.clone() : null,
-          end: this.end ? this.end.clone() : null,
-          duration: this.duration ? this.duration.clone() : null
-        });
-      }
+        /**
+         * Returns a clone of the duration object.
+         *
+         * @return {ICAL.Period}      The cloned object
+         */
+        function clone() {
+          return Period.fromData({
+            start: this.start ? this.start.clone() : null,
+            end: this.end ? this.end.clone() : null,
+            duration: this.duration ? this.duration.clone() : null
+          });
+        }
 
       /**
        * Calculates the duration of the period, either directly or by subtracting
@@ -5878,29 +5879,29 @@
     }], [{
       key: "fromString",
       value:
-      /**
-       * Creates a new {@link ICAL.Period} instance from the passed string.
-       *
-       * @param {String} str            The string to parse
-       * @param {ICAL.Property} prop    The property this period will be on
-       * @return {ICAL.Period}          The created period instance
-       */
-      function fromString(str, prop) {
-        var parts = str.split('/');
-        if (parts.length !== 2) {
-          throw new Error('Invalid string value: "' + str + '" must contain a "/" char.');
+        /**
+         * Creates a new {@link ICAL.Period} instance from the passed string.
+         *
+         * @param {String} str            The string to parse
+         * @param {ICAL.Property} prop    The property this period will be on
+         * @return {ICAL.Period}          The created period instance
+         */
+        function fromString(str, prop) {
+          var parts = str.split('/');
+          if (parts.length !== 2) {
+            throw new Error('Invalid string value: "' + str + '" must contain a "/" char.');
+          }
+          var options = {
+            start: Time.fromDateTimeString(parts[0], prop)
+          };
+          var end = parts[1];
+          if (Duration.isValueString(end)) {
+            options.duration = Duration.fromString(end);
+          } else {
+            options.end = Time.fromDateTimeString(end, prop);
+          }
+          return new Period(options);
         }
-        var options = {
-          start: Time.fromDateTimeString(parts[0], prop)
-        };
-        var end = parts[1];
-        if (Duration.isValueString(end)) {
-          options.duration = Duration.fromString(end);
-        } else {
-          options.end = Time.fromDateTimeString(end, prop);
-        }
-        return new Period(options);
-      }
 
       /**
        * Creates a new {@link ICAL.Period} instance from the given data object.
@@ -6294,12 +6295,12 @@
           return icalValues.date.toICAL(aValue);
         } else if (len >= 19) {
           var result = aValue.slice(0, 4) + aValue.slice(5, 7) +
-          // grab the (DDTHH) segment
-          aValue.slice(8, 13) +
-          // MM
-          aValue.slice(14, 16) +
-          // SS
-          aValue.slice(17, 19);
+            // grab the (DDTHH) segment
+            aValue.slice(8, 13) +
+            // MM
+            aValue.slice(14, 16) +
+            // SS
+            aValue.slice(17, 19);
           if (aValue[19] && aValue[19] === 'Z') {
             result += 'Z';
           }
@@ -7604,16 +7605,16 @@
     }], [{
       key: "fromString",
       value:
-      /**
-       * Create an {@link ICAL.Property} by parsing the passed iCalendar string.
-       *
-       * @param {String} str                        The iCalendar string to parse
-       * @param {ICAL.design.designSet=} designSet  The design data to use for this property
-       * @return {ICAL.Property}                    The created iCalendar property
-       */
-      function fromString(str, designSet) {
-        return new Property(parse.property(str, designSet));
-      }
+        /**
+         * Create an {@link ICAL.Property} by parsing the passed iCalendar string.
+         *
+         * @param {String} str                        The iCalendar string to parse
+         * @param {ICAL.design.designSet=} designSet  The design data to use for this property
+         * @return {ICAL.Property}                    The created iCalendar property
+         */
+        function fromString(str, designSet) {
+          return new Property(parse.property(str, designSet));
+        }
     }]);
   }();
 
@@ -7679,13 +7680,13 @@
     return _createClass(Component, [{
       key: "name",
       get:
-      /**
-       * The name of this component
-       * @readonly
-       */
-      function get() {
-        return this.jCal[NAME_INDEX];
-      }
+        /**
+         * The name of this component
+         * @readonly
+         */
+        function get() {
+          return this.jCal[NAME_INDEX];
+        }
 
       /**
        * The design set for this component, e.g. icalendar vs vcard
@@ -8165,14 +8166,14 @@
     }], [{
       key: "fromString",
       value:
-      /**
-       * Create an {@link ICAL.Component} by parsing the passed iCalendar string.
-       *
-       * @param {String} str        The iCalendar string to parse
-       */
-      function fromString(str) {
-        return new Component(parse.component(str));
-      }
+        /**
+         * Create an {@link ICAL.Component} by parsing the passed iCalendar string.
+         *
+         * @param {String} str        The iCalendar string to parse
+         */
+        function fromString(str) {
+          return new Component(parse.component(str));
+        }
     }]);
   }();
 
@@ -8307,54 +8308,54 @@
     return _createClass(RecurExpansion, [{
       key: "fromData",
       value:
-      /**
-       * Initialize the recurrence expansion from the data object. The options
-       * object may also contain additional members, see the
-       * {@link ICAL.RecurExpansion constructor} for more details.
-       *
-       * @param {Object} options
-       *        Recurrence expansion options
-       * @param {ICAL.Time} options.dtstart
-       *        Start time of the event
-       * @param {ICAL.Component=} options.component
-       *        Component for expansion, required if not resuming.
-       */
-      function fromData(options) {
-        var start = formatClassType(options.dtstart, Time);
-        if (!start) {
-          throw new Error('.dtstart (ICAL.Time) must be given');
-        } else {
-          this.dtstart = start;
-        }
-        if (options.component) {
-          this._init(options.component);
-        } else {
-          this.last = formatClassType(options.last, Time) || start.clone();
-          if (!options.ruleIterators) {
-            throw new Error('.ruleIterators or .component must be given');
+        /**
+         * Initialize the recurrence expansion from the data object. The options
+         * object may also contain additional members, see the
+         * {@link ICAL.RecurExpansion constructor} for more details.
+         *
+         * @param {Object} options
+         *        Recurrence expansion options
+         * @param {ICAL.Time} options.dtstart
+         *        Start time of the event
+         * @param {ICAL.Component=} options.component
+         *        Component for expansion, required if not resuming.
+         */
+        function fromData(options) {
+          var start = formatClassType(options.dtstart, Time);
+          if (!start) {
+            throw new Error('.dtstart (ICAL.Time) must be given');
+          } else {
+            this.dtstart = start;
           }
-          this.ruleIterators = options.ruleIterators.map(function (item) {
-            return formatClassType(item, RecurIterator);
-          });
-          this.ruleDateInc = options.ruleDateInc;
-          this.exDateInc = options.exDateInc;
-          if (options.ruleDates) {
-            this.ruleDates = options.ruleDates.map(function (item) {
-              return formatClassType(item, Time);
+          if (options.component) {
+            this._init(options.component);
+          } else {
+            this.last = formatClassType(options.last, Time) || start.clone();
+            if (!options.ruleIterators) {
+              throw new Error('.ruleIterators or .component must be given');
+            }
+            this.ruleIterators = options.ruleIterators.map(function (item) {
+              return formatClassType(item, RecurIterator);
             });
-            this.ruleDate = this.ruleDates[this.ruleDateInc];
-          }
-          if (options.exDates) {
-            this.exDates = options.exDates.map(function (item) {
-              return formatClassType(item, Time);
-            });
-            this.exDate = this.exDates[this.exDateInc];
-          }
-          if (typeof options.complete !== 'undefined') {
-            this.complete = options.complete;
+            this.ruleDateInc = options.ruleDateInc;
+            this.exDateInc = options.exDateInc;
+            if (options.ruleDates) {
+              this.ruleDates = options.ruleDates.map(function (item) {
+                return formatClassType(item, Time);
+              });
+              this.ruleDate = this.ruleDates[this.ruleDateInc];
+            }
+            if (options.exDates) {
+              this.exDates = options.exDates.map(function (item) {
+                return formatClassType(item, Time);
+              });
+              this.exDate = this.exDates[this.exDateInc];
+            }
+            if (typeof options.complete !== 'undefined') {
+              this.complete = options.complete;
+            }
           }
         }
-      }
 
       /**
        * Retrieve the next occurrence in the series.
@@ -8686,43 +8687,43 @@
     return _createClass(Event, [{
       key: "relateException",
       value:
-      /**
-       * Relates a given event exception to this object.  If the given component
-       * does not share the UID of this event it cannot be related and will throw
-       * an exception.
-       *
-       * If this component is an exception it cannot have other exceptions
-       * related to it.
-       *
-       * @param {ICAL.Component|ICAL.Event} obj       Component or event
-       */
-      function relateException(obj) {
-        if (this.isRecurrenceException()) {
-          throw new Error('cannot relate exception to exceptions');
-        }
-        if (obj instanceof Component) {
-          obj = new Event(obj);
-        }
-        if (this.strictExceptions && obj.uid !== this.uid) {
-          throw new Error('attempted to relate unrelated exception');
-        }
-        var id = obj.recurrenceId.toString();
+        /**
+         * Relates a given event exception to this object.  If the given component
+         * does not share the UID of this event it cannot be related and will throw
+         * an exception.
+         *
+         * If this component is an exception it cannot have other exceptions
+         * related to it.
+         *
+         * @param {ICAL.Component|ICAL.Event} obj       Component or event
+         */
+        function relateException(obj) {
+          if (this.isRecurrenceException()) {
+            throw new Error('cannot relate exception to exceptions');
+          }
+          if (obj instanceof Component) {
+            obj = new Event(obj);
+          }
+          if (this.strictExceptions && obj.uid !== this.uid) {
+            throw new Error('attempted to relate unrelated exception');
+          }
+          var id = obj.recurrenceId.toString();
 
-        // we don't sort or manage exceptions directly
-        // here the recurrence expander handles that.
-        this.exceptions[id] = obj;
+          // we don't sort or manage exceptions directly
+          // here the recurrence expander handles that.
+          this.exceptions[id] = obj;
 
-        // index RANGE=THISANDFUTURE exceptions so we can
-        // look them up later in getOccurrenceDetails.
-        if (obj.modifiesFuture()) {
-          var item = [obj.recurrenceId.toUnixTime(), id];
+          // index RANGE=THISANDFUTURE exceptions so we can
+          // look them up later in getOccurrenceDetails.
+          if (obj.modifiesFuture()) {
+            var item = [obj.recurrenceId.toUnixTime(), id];
 
-          // we keep them sorted so we can find the nearest
-          // value later on...
-          var idx = binsearchInsert(this.rangeExceptions, item, compareRangeException);
-          this.rangeExceptions.splice(idx, 0, item);
+            // we keep them sorted so we can find the nearest
+            // value later on...
+            var idx = binsearchInsert(this.rangeExceptions, item, compareRangeException);
+            this.rangeExceptions.splice(idx, 0, item);
+          }
         }
-      }
 
       /**
        * Checks if this record is an exception and has the RANGE=THISANDFUTURE
@@ -9221,28 +9222,28 @@
        * Fired when parsing is complete
        * @callback
        */
-      _defineProperty(this, "oncomplete", /* c8 ignore next */function () {});
+      _defineProperty(this, "oncomplete", /* c8 ignore next */function () { });
       /**
        * Fired if an error occurs during parsing.
        *
        * @callback
        * @param {Error} err details of error
        */
-      _defineProperty(this, "onerror", /* c8 ignore next */function (err) {});
+      _defineProperty(this, "onerror", /* c8 ignore next */function (err) { });
       /**
        * Fired when a top level component (VTIMEZONE) is found
        *
        * @callback
        * @param {ICAL.Timezone} component     Timezone object
        */
-      _defineProperty(this, "ontimezone", /* c8 ignore next */function (component) {});
+      _defineProperty(this, "ontimezone", /* c8 ignore next */function (component) { });
       /**
        * Fired when a top level component (VEVENT) is found.
        *
        * @callback
        * @param {ICAL.Event} component    Top level component
        */
-      _defineProperty(this, "onevent", /* c8 ignore next */function (component) {});
+      _defineProperty(this, "onevent", /* c8 ignore next */function (component) { });
       if (typeof options === 'undefined') {
         options = {};
       }
@@ -9256,55 +9257,55 @@
     return _createClass(ComponentParser, [{
       key: "process",
       value:
-      /**
-       * Process a string or parse ical object.  This function itself will return
-       * nothing but will start the parsing process.
-       *
-       * Events must be registered prior to calling this method.
-       *
-       * @param {ICAL.Component|String|Object} ical      The component to process,
-       *        either in its final form, as a jCal Object, or string representation
-       */
-      function process(ical) {
-        //TODO: this is sync now in the future we will have a incremental parser.
-        if (typeof ical === 'string') {
-          ical = parse(ical);
-        }
-        if (!(ical instanceof Component)) {
-          ical = new Component(ical);
-        }
-        var components = ical.getAllSubcomponents();
-        var i = 0;
-        var len = components.length;
-        var component;
-        for (; i < len; i++) {
-          component = components[i];
-          switch (component.name) {
-            case 'vtimezone':
-              if (this.parseTimezone) {
-                var tzid = component.getFirstPropertyValue('tzid');
-                if (tzid) {
-                  this.ontimezone(new Timezone({
-                    tzid: tzid,
-                    component: component
-                  }));
-                }
-              }
-              break;
-            case 'vevent':
-              if (this.parseEvent) {
-                this.onevent(new Event(component));
-              }
-              break;
-            default:
-              continue;
+        /**
+         * Process a string or parse ical object.  This function itself will return
+         * nothing but will start the parsing process.
+         *
+         * Events must be registered prior to calling this method.
+         *
+         * @param {ICAL.Component|String|Object} ical      The component to process,
+         *        either in its final form, as a jCal Object, or string representation
+         */
+        function process(ical) {
+          //TODO: this is sync now in the future we will have a incremental parser.
+          if (typeof ical === 'string') {
+            ical = parse(ical);
           }
-        }
+          if (!(ical instanceof Component)) {
+            ical = new Component(ical);
+          }
+          var components = ical.getAllSubcomponents();
+          var i = 0;
+          var len = components.length;
+          var component;
+          for (; i < len; i++) {
+            component = components[i];
+            switch (component.name) {
+              case 'vtimezone':
+                if (this.parseTimezone) {
+                  var tzid = component.getFirstPropertyValue('tzid');
+                  if (tzid) {
+                    this.ontimezone(new Timezone({
+                      tzid: tzid,
+                      component: component
+                    }));
+                  }
+                }
+                break;
+              case 'vevent':
+                if (this.parseEvent) {
+                  this.onevent(new Event(component));
+                }
+                break;
+              default:
+                continue;
+            }
+          }
 
-        //XXX: ideally we should do a "nextTick" here
-        //     so in all cases this is actually async.
-        this.oncomplete();
-      }
+          //XXX: ideally we should do a "nextTick" here
+          //     so in all cases this is actually async.
+          this.oncomplete();
+        }
     }]);
   }();
 

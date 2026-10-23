@@ -2,26 +2,25 @@
 * Calendar mappings and user settings for this Apps Script project.
 */
 
-var sourceCalendars = [                // One entry per source. source can be an ICS URL or a Google Calendar ID/name.
-                                       // target is the target calendar name; targetId selects an exact writable calendar ID.
-                                       // Set createTargetCalendarIfMissing: true only when intentionally creating a new target.
-                                       // colour is optional; see
-                                       // https://developers.google.com/apps-script/reference/calendar/event-color
-                                       // Event settings can be overridden on a source entry: defaultColor,
-                                       // addAlerts, addOrganizerToTitle, descriptionAsTitles, addCalToTitle,
-                                       // addAttendees, defaultAllDayReminder, overrideVisibility,
-                                       // recurringInstanceWindowDays, addEventsToCalendar,
-                                       // modifyExistingEvents, removeEventsFromCalendar,
-                                       // removePastEventsFromCalendar, skipIfEmptyFeed,
-                                       // pastEventWindowDays. Unspecified settings use global values.
-                                       // Other optional source settings: titlePrefix, titlePrefixAllDayOnly,
-                                       // mapMicrosoftTentativeToFree, fallbackReminderMinutes,
-                                       // decodeOutlookSafeLinks.
-                                       // Legacy [source, target, colour] entries are also supported.
-  {source: "icsUrl1", target: "targetCalendar1"},
-  {source: "icsUrl2", target: "targetCalendar2", colour: "11"},
-  {source: "icsUrl3", target: "targetCalendar1"}
-
+var sourceCalendars = [                 // One entry per source. source can be an ICS URL or a Google Calendar ID/name.
+                                        // target is the target calendar name; targetId selects an exact writable calendar ID.
+                                        // Set createTargetCalendarIfMissing: true only when intentionally creating a new target.
+                                        // colour is optional; see
+                                        // https://developers.google.com/apps-script/reference/calendar/event-color
+                                        // Event settings can be overridden on a source entry: defaultColor,
+                                        // addAlerts, addOrganizerToTitle, descriptionAsTitles, addCalToTitle,
+                                        // addAttendees, defaultAllDayReminder, overrideVisibility,
+                                        // recurringInstanceWindowDays, addEventsToCalendar,
+                                        // modifyExistingEvents, removeEventsFromCalendar,
+                                        // removePastEventsFromCalendar, skipIfEmptyFeed,
+                                        // pastEventWindowDays. Unspecified settings use global values.
+                                        // Other optional source settings: titlePrefix, titlePrefixAllDayOnly,
+                                        // mapMicrosoftTentativeToFree, fallbackReminderMinutes,
+                                        // decodeOutlookSafeLinks.
+                                        // Legacy [source, target, colour] entries are also supported.
+  { source: "icsUrl1", target: "targetCalendar1" },
+  { source: "icsUrl2", target: "targetCalendar2", colour: "11" },
+  { source: "icsUrl3", target: "targetCalendar1" }
 ];
 
 var howFrequent = 15;                     // What interval (minutes) to run this script on to check for new events.  Any integer can be used, but will be rounded up to 5, 10, 15, 30 or to the nearest hour after that.. 60, 120, etc. 1440 (24 hours) is the maximum value.  Anything above that will be replaced with 1440.
@@ -38,8 +37,7 @@ var addOrganizerToTitle = false;          // Whether to prefix the event name wi
 var descriptionAsTitles = false;          // Whether to use the ics/ical descriptions as titles (true) or to use the normal titles as titles (false)
 var addCalToTitle = false;                // Whether to add the source calendar to title
 var addAttendees = false;                 // Whether to add the attendee list. If true, duplicate events will be automatically added to the attendees' calendar.
-var defaultAllDayReminder = -1;           // Default reminder for all day events in minutes before the day of the event (-1 = no reminder, the value has to be between 0 and 40320)
-                                          // See https://github.com/derekantrican/GAS-ICS-Sync/issues/75 for why this is necessary.
+var defaultAllDayReminder = -1;           // Default reminder for all day events in minutes before the day of the event (-1 = no reminder, the value has to be between 0 and 40320). See https://github.com/derekantrican/GAS-ICS-Sync/issues/75 for why this is necessary.
 var titlePrefix = "";                     // Optional prefix for copied event titles.
 var titlePrefixAllDayOnly = false;        // Apply titlePrefix only to all-day events.
 var mapMicrosoftTentativeToFree = false;  // Treat Microsoft's tentative busy status as free unless TRANSP explicitly says otherwise.
