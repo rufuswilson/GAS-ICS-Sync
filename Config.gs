@@ -58,5 +58,21 @@ var defaultMaxRetries = 10; // Maximum retries for Calendar API calls.
 // "release" follows the latest published release; "bleeding-edge" follows the branch below.
 var autoUpdateRepository = "rufuswilson/GAS-ICS-Sync";
 var autoUpdateMode = "auto";               // "auto" or "email"
-var autoUpdateChannel = "release";         // "release" or "bleeding-edge"
+var autoUpdateChannel = "bleeding-edge";   // "release" or "bleeding-edge"; this fork has no published release yet.
 var autoUpdateBranch = "stable";           // Used only for "bleeding-edge"
+
+// Identify the account running a manual sync or owning its scheduled trigger.
+function getSyncUserEmail_() {
+  if (typeof Session === "undefined") return ""; // Allows local tests to load this file.
+  var activeEmail = Session.getActiveUser().getEmail();
+  var effectiveEmail = Session.getEffectiveUser().getEmail();
+  return String(activeEmail || effectiveEmail || "").toLowerCase();
+}
+
+/** Run from the editor to confirm which account the script can identify. */
+function ShowCurrentUserEmail() {
+  var userEmail = getSyncUserEmail_();
+  if (!userEmail) throw new Error("Apps Script did not provide an account email");
+  Logger.log("Run by user: " + userEmail);
+  return userEmail;
+}

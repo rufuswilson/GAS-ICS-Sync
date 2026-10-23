@@ -44,12 +44,12 @@ ICS feeds are decoded as UTF-8 and require valid HTTPS certificates. VFREEBUSY-o
 ```javascript
 var autoUpdateRepository = "rufuswilson/GAS-ICS-Sync";
 var autoUpdateMode = "auto";          // "auto" installs; "email" only notifies
-var autoUpdateChannel = "release";    // "release" or "bleeding-edge"
+var autoUpdateChannel = "bleeding-edge"; // "release" or "bleeding-edge"
 var autoUpdateBranch = "stable";      // branch used for bleeding-edge
 var email = "you@example.com";       // required for email mode
 ```
 
-Release mode follows the latest published GitHub release. Bleeding edge follows the latest commit on the selected branch. Set `autoUpdateBranch` to `stable` in your private `Config.gs` to follow this fork's changes; the repository copy of `Config.gs` still defaults to `master`. Both channels fetch code at one fixed tag or commit. `Config.gs` and `Filters.gs` in your Apps Script project are retained. Run `PreviewUpdate()` from the editor to preview the selected version and managed files without installing or sending email. `AutoUpdate()` checks and acts on the configured mode; running `install()` recreates the daily update trigger. An existing `checkForUpdate` trigger replaces itself with an `AutoUpdate` trigger on its next run.
+Release mode follows the latest published GitHub release. Bleeding edge follows the latest commit on the selected branch. This fork currently has no published release, so the repository copy of `Config.gs` defaults to `bleeding-edge` on `stable`. Both channels fetch code at one fixed tag or commit. `Config.gs` and `Filters.gs` in your Apps Script project are retained. Run `PreviewUpdate()` from the editor to preview the selected version and managed files without installing or sending email. `AutoUpdate()` checks and acts on the configured mode; running `install()` recreates the daily update trigger. An existing `checkForUpdate` trigger replaces itself with an `AutoUpdate` trigger on its next run.
 
 Before enabling automatic installation in release mode, publish a release containing the `stable` code. The selected version must contain `AutoUpdate`; older versions are rejected so they cannot remove the updater. Release mode has nothing to install until the fork has a published release. For automatic installation or preview, enable the Apps Script API in the script's Google Cloud project and enable project access at [Apps Script settings](https://script.google.com/home/usersettings). Find the Cloud project number under Apps Script > Project Settings. If you cannot access its default Cloud project in Google Cloud Console, [attach a standard Cloud project](https://developers.google.com/apps-script/guides/cloud-platform-projects#switch_to_a_different_standard_cloud_project), enable the Apps Script API there, and reauthorize the script. After adding the `script.projects` scope, run `PreviewUpdate()` manually in the editor to grant the new permission before relying on the daily trigger. If you only want email notices, set `autoUpdateMode = "email"` and provide `email`.
 
@@ -60,6 +60,8 @@ Set `defaultColor` in `Config.gs` to a `CalendarApp.EventColor` value (for examp
 Google Calendar sources copy ordinary and recurring events and their recurrence overrides. The script skips removal from a target when any of its sources cannot be read.
 
 ### Diagnosing missing events or an unexpected runtime exit
+
+Run `CheckCurrentUserEmail()` in the Apps Script editor to log the account detected by `Config.gs` without syncing any calendars. The lookup uses the active user's email when available and falls back to the effective user, which is the account that owns a scheduled trigger. The manifest includes the `userinfo.email` scope for this lookup.
 
 If a run reports newly copied events but none appear in the expected calendar, check the target calendar ID in the execution log and the IDs of calendars with duplicate display names. Set `targetId` to the intended writable calendar. The script now stops on an ambiguous name or missing target instead of silently creating a second calendar.
 

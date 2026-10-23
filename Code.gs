@@ -66,7 +66,28 @@
 //!!!!!!!!!!!!!!!! DO NOT EDIT BELOW HERE UNLESS YOU REALLY KNOW WHAT YOU'RE DOING !!!!!!!!!!!!!!!!!!!!
 //=====================================================================================================
 
-var currentUserEmail = Session.getActiveUser().getEmail();
+var defaultMaxRetries = typeof defaultMaxRetries === "number" ? defaultMaxRetries : 10; // Keep a private Config.gs override.
+
+// Defaults for Apps Script projects whose private Config.gs predates these options.
+// Config.gs may override every value below; an explicit false or null is preserved.
+var skipIfEmptyFeed = typeof skipIfEmptyFeed === "undefined" ? true : skipIfEmptyFeed;
+var pastEventWindowDays = typeof pastEventWindowDays === "undefined" ? null : pastEventWindowDays;
+var maxCleanupDeletesPerRun = typeof maxCleanupDeletesPerRun === "undefined" ? 100 : maxCleanupDeletesPerRun;
+var recurringInstanceWindowDays = typeof recurringInstanceWindowDays === "undefined" ? 180 : recurringInstanceWindowDays;
+var titlePrefix = typeof titlePrefix === "undefined" ? "" : titlePrefix;
+var titlePrefixAllDayOnly = typeof titlePrefixAllDayOnly === "undefined" ? false : titlePrefixAllDayOnly;
+var mapMicrosoftTentativeToFree = typeof mapMicrosoftTentativeToFree === "undefined" ? false : mapMicrosoftTentativeToFree;
+var fallbackReminderMinutes = typeof fallbackReminderMinutes === "undefined" ? -1 : fallbackReminderMinutes;
+var decodeOutlookSafeLinks = typeof decodeOutlookSafeLinks === "undefined" ? false : decodeOutlookSafeLinks;
+var autoUpdateRepository = typeof autoUpdateRepository === "undefined" ? "rufuswilson/GAS-ICS-Sync" : autoUpdateRepository;
+var autoUpdateMode = typeof autoUpdateMode === "undefined" ? "auto" : autoUpdateMode;
+var autoUpdateChannel = typeof autoUpdateChannel === "undefined" ? "bleeding-edge" : autoUpdateChannel;
+var autoUpdateBranch = typeof autoUpdateBranch === "undefined" ? "stable" : autoUpdateBranch;
+
+/** Check the account without running calendar sync. */
+function CheckCurrentUserEmail() {
+  return ShowCurrentUserEmail();
+}
 
 function install() {
   // Delete any already existing triggers so we don't create excessive triggers
@@ -88,12 +109,10 @@ function install() {
   ScriptApp.newTrigger("startSync").timeBased().after(1000).create();
 
   // Check the selected GitHub channel once a day.
-  if (currentUserEmail == DriveApp.getFileById(ScriptApp.getScriptId()).getOwner().getEmail()) {
-    ScriptApp.newTrigger("AutoUpdate")
-      .timeBased()
-      .everyDays(1)
-      .create();
-  }
+  ScriptApp.newTrigger("AutoUpdate")
+    .timeBased()
+    .everyDays(1)
+    .create();
 }
 
 function uninstall() {
@@ -187,7 +206,8 @@ function startSync() {
     return;
   }
 
-  Logger.log("Run by user: " + currentUserEmail);
+  var runUserEmail = typeof getSyncUserEmail_ === "function" ? getSyncUserEmail_() : "";
+  if (runUserEmail) Logger.log("Run by user: " + runUserEmail);
 
   try {
 

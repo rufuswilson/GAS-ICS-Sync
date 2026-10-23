@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const code = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
 const helpers = fs.readFileSync(path.join(__dirname, '..', 'Helpers.gs'), 'utf8');
+const config = fs.readFileSync(path.join(__dirname, '..', 'Config.gs'), 'utf8');
 const repoApi = 'https://api.github.com/repos/rufuswilson/GAS-ICS-Sync';
 const projectApi = 'https://script.googleapis.com/v1/projects/project-id/content';
 const latest = {tag_name: 'v2.0', html_url: 'https://github.com/rufuswilson/GAS-ICS-Sync/releases/tag/v2.0'};
@@ -18,6 +19,14 @@ const sources = {
   'Config.gs': 'var sourceCalendars = [];',
   'Filters.gs': 'var filters = [];',
 };
+
+test('repository defaults follow the stable branch while no release is published', () => {
+  const context = vm.createContext({});
+  vm.runInContext(config, context);
+  assert.equal(context.autoUpdateRepository, 'rufuswilson/GAS-ICS-Sync');
+  assert.equal(context.autoUpdateChannel, 'bleeding-edge');
+  assert.equal(context.autoUpdateBranch, 'stable');
+});
 
 function setup(options = {}) {
   const remoteSources = {...sources};

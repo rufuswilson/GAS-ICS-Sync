@@ -30,6 +30,36 @@ test('retry limit is available from Code.gs without Config.gs', () => {
   const context = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8'), context);
   assert.equal(context.defaultMaxRetries, 10);
+  const configured = vm.createContext({defaultMaxRetries: 4});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8'), configured);
+  assert.equal(configured.defaultMaxRetries, 4);
+});
+
+test('new sync options have defaults when an older private Config.gs omits them', () => {
+  const code = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
+  const context = vm.createContext({skipIfEmptyFeed: false, pastEventWindowDays: null,
+    titlePrefix: 'Private: ', autoUpdateMode: 'email'});
+  vm.runInContext(code, context);
+  assert.equal(context.skipIfEmptyFeed, false);
+  assert.equal(context.pastEventWindowDays, null);
+  assert.equal(context.titlePrefix, 'Private: ');
+  assert.equal(context.autoUpdateMode, 'email');
+  assert.equal(context.maxCleanupDeletesPerRun, 100);
+  assert.equal(context.recurringInstanceWindowDays, 180);
+  assert.equal(context.autoUpdateChannel, 'bleeding-edge');
+  assert.equal(context.autoUpdateBranch, 'stable');
+});
+
+test('configuration finds the active email and falls back to the trigger owner', () => {
+  const config = fs.readFileSync(path.join(__dirname, '..', 'Config.gs'), 'utf8');
+  const context = vm.createContext({Session: {
+    getActiveUser() { return {getEmail() { return ''; }}; },
+    getEffectiveUser() { return {getEmail() { return 'Owner@Example.com'; }}; },
+  }});
+  vm.runInContext(config, context);
+  assert.equal(context.getSyncUserEmail_(), 'owner@example.com');
+  context.Session.getActiveUser = () => ({getEmail() { return 'Active@Example.com'; }});
+  assert.equal(context.getSyncUserEmail_(), 'active@example.com');
 });
 
 test('sync lock is released after success and after an error', () => {
