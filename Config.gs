@@ -5,6 +5,12 @@
 var sourceCalendars = [                // One entry per source. source can be an ICS URL or a Google Calendar ID/name.
                                        // target is the target calendar name. colour is optional; see
                                        // https://developers.google.com/apps-script/reference/calendar/event-color
+                                       // Event settings can be overridden on a source entry: defaultColor,
+                                       // addAlerts, addOrganizerToTitle, descriptionAsTitles, addCalToTitle,
+                                       // addAttendees, defaultAllDayReminder, overrideVisibility,
+                                       // recurringInstanceWindowDays, addEventsToCalendar,
+                                       // modifyExistingEvents, removeEventsFromCalendar,
+                                       // removePastEventsFromCalendar. Unspecified settings use global values.
                                        // Legacy [source, target, colour] entries are also supported.
   {source: "icsUrl1", target: "targetCalendar1"},
   {source: "icsUrl2", target: "targetCalendar2", colour: "11"},

@@ -162,6 +162,7 @@ function clearGASEvents(targetName, dryRun){
 var calendarEvents = [];
 var calendarEventsIds = [];
 var icsEventsIds = [];
+var icsEventSourceHashes = Object.create(null);
 var calendarEventsMD5s = [];
 var recurringEvents = [];
 var nativeExceptions = [];
@@ -193,12 +194,20 @@ function startSync(){
     calendarEvents = [];
     calendarEventsIds = [];
     icsEventsIds = [];
+    icsEventSourceHashes = Object.create(null);
     calendarEventsMD5s = [];
     recurringEvents = [];
     nativeExceptions = [];
 
     targetCalendarName = calendar.target;
     var sourceCalendarURLs = calendar.sources;
+    var canAddOrModify = sourceCalendarURLs.some(function(source){
+      return sourceSetting(source, "addEventsToCalendar", addEventsToCalendar) ||
+        sourceSetting(source, "modifyExistingEvents", modifyExistingEvents);
+    });
+    var canRemove = sourceCalendarURLs.some(function(source){
+      return sourceSetting(source, "removeEventsFromCalendar", removeEventsFromCalendar);
+    });
     var vevents;
 
     //------------------------ Fetch URL items ------------------------
@@ -213,7 +222,7 @@ function startSync(){
     Logger.log("Working on calendar: " + targetCalendarId);
 
     //------------------------ Parse existing events --------------------------
-    if(addEventsToCalendar || modifyExistingEvents || removeEventsFromCalendar){
+    if(canAddOrModify || canRemove){
       var eventList =
         callWithBackoff(function(){
             return Calendar.Events.list(targetCalendarId, {showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 2500});
@@ -243,7 +252,7 @@ function startSync(){
     }
 
     //------------------------ Process ical events ------------------------
-    if (addEventsToCalendar || modifyExistingEvents){
+    if (canAddOrModify){
       Logger.log("Processing " + vevents.length + " events");
       var calendarTz =
         callWithBackoff(function(){
@@ -259,9 +268,9 @@ function startSync(){
     }
 
     //------------------------ Remove old events from calendar ------------------------
-    if(removeEventsFromCalendar && !sourceFetchFailed && !reportOverallFailure){
+    if(canRemove && !sourceFetchFailed && !reportOverallFailure){
       Logger.log("Checking " + calendarEvents.length + " events for removal");
-      processEventCleanup();
+      processEventCleanup(sourceCalendarURLs);
       Logger.log("Done checking events for removal");
     }
     else if (sourceFetchFailed || reportOverallFailure)
@@ -275,7 +284,7 @@ function startSync(){
     //------------------------ Add Recurring Event Instances ------------------------
     Logger.log("Processing " + recurringEvents.length + " Recurrence Instances!");
     for (var recEvent of recurringEvents){
-      processICSEventInstance(recEvent);
+      processICSEventInstance(recEvent.event, recEvent.settings);
     }
     processNativeExceptions();
   }

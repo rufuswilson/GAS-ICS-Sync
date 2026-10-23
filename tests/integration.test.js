@@ -94,6 +94,49 @@ test('default colour applies to ICS and native events, with source colour taking
   assert.equal(s.makeNativeEvent(nativeEvent, source).colorId, '9');
 });
 
+test('native source settings override global event settings without affecting another source', () => {
+  const s = script({});
+  s.addAttendees = true;
+  s.addCalToTitle = false;
+  s.addAlerts = 'yes';
+  s.overrideVisibility = '';
+  s.defaultColor = 'RED';
+  const event = {id: 'event-1', summary: 'Meeting', attendees: [{email: 'person@example.com'}],
+    start: {date: '2026-10-22'}, end: {date: '2026-10-23'}};
+  const calendar = {id: 'source-id', summary: 'Source'};
+  const overridden = s.makeNativeEvent(event, {calendar, settings: {
+    addAttendees: false, addCalToTitle: true, addAlerts: 'no',
+    overrideVisibility: 'private', defaultColor: 'BLUE',
+  }});
+  assert.equal(overridden.summary, '(Source) Meeting');
+  assert.equal(overridden.attendees, undefined);
+  assert.equal(overridden.colorId, '9');
+  assert.equal(overridden.visibility, 'private');
+  assert.equal(overridden.extendedProperties.private.sourceHash, s.sourceAddressHash('source-id'));
+  assert.equal(overridden.reminders.useDefault, false);
+  assert.equal(overridden.reminders.overrides.length, 0);
+  const unchanged = s.makeNativeEvent(event, {calendar});
+  assert.equal(unchanged.summary, 'Meeting');
+  assert.equal(unchanged.attendees.length, 1);
+  assert.equal(unchanged.colorId, '11');
+});
+
+test('ICS source settings reach event creation', () => {
+  const s = script({newEvent() { return {}; }});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s, {filename: 'ical.js.gs'});
+  const feed = `BEGIN:VCALENDAR\nVERSION:2.0\nX-WR-CALNAME:Feed\nBEGIN:VEVENT\nUID:one\nDTSTART;VALUE=DATE:20261024\nDTEND;VALUE=DATE:20261025\nSUMMARY:Meeting\nDESCRIPTION:Details\nATTENDEE:mailto:person@example.com\nEND:VEVENT\nEND:VCALENDAR`;
+  const settings = {source: 'feed.ics', descriptionAsTitles: true, addCalToTitle: true,
+    addAttendees: true, defaultAllDayReminder: 30, addAlerts: 'yes', overrideVisibility: 'private'};
+  const parsed = s.parseResponses([{kind: 'ics', content: feed, source: 'feed.ics', settings}]);
+  assert.equal(parsed[0]._sourceSettings, settings);
+  const event = s.createICSEvent(parsed[0], 'Etc/UTC');
+  assert.equal(event.summary, '(Feed) Details');
+  assert.equal(event.visibility, 'private');
+  assert.equal(event.attendees[0].email, 'person@example.com');
+  assert.equal(event.reminders.overrides[0].minutes, 30);
+  assert.equal(event.extendedProperties.private.sourceHash, s.sourceAddressHash('feed.ics'));
+});
+
 test('Google Calendar lookup follows pagination and parse keeps stable source IDs', () => {
   const calendar = {CalendarList: {list(options) {
     return options.pageToken ? {items: [{id: 'source-id', summary: 'Source'}]} :
@@ -145,6 +188,32 @@ test('native event uses a stable source key and skips an unchanged target event'
   s.processNativeEvent({nativeEvent, source});
   assert.equal(writes, 0);
   assert.equal(copy.extendedProperties.private.id, 'gcal:source-id:event-1');
+});
+
+test('source add and modify flags override global save flags', () => {
+  let inserts = 0;
+  let updates = 0;
+  const s = script({Events: {
+    insert(event) { inserts++; return event; },
+    update(event) { updates++; return event; },
+  }});
+  s.addEventsToCalendar = false;
+  s.modifyExistingEvents = false;
+  const source = {calendar: {id: 'source-id', summary: 'Source'},
+    settings: {addEventsToCalendar: true, modifyExistingEvents: true}};
+  const event = {id: 'event-1', summary: 'Meeting',
+    start: {date: '2026-10-22'}, end: {date: '2026-10-23'}};
+  s.processNativeEvent({nativeEvent: event, source});
+  assert.equal(inserts, 1);
+  const copy = s.makeNativeEvent(event, source);
+  s.calendarEventsIds = [copy.extendedProperties.private.id];
+  s.calendarEvents = [{id: 'target-event', extendedProperties: {private: {MD5: 'old'}}}];
+  s.processNativeEvent({nativeEvent: event, source});
+  assert.equal(updates, 1);
+  source.settings = {addEventsToCalendar: false, modifyExistingEvents: false};
+  s.processNativeEvent({nativeEvent: event, source});
+  assert.equal(updates, 1);
+  assert.equal(s.reportOverallFailure, false);
 });
 
 test('recurrence exception patches its original instance, never the next instance', () => {
@@ -292,11 +361,69 @@ test('cleanup removes a previous copied series and occurrences outside the rolli
     'gcal-instance:source-id:series:2026-10-20T09:00:00Z',
     'gcal-instance:source-id:series:2026-10-24T09:00:00Z',
   ];
+  const sourceHash = s.sourceAddressHash('source-id');
   s.calendarEvents = s.calendarEventsIds.map((id, i) => ({
     id: 'target-' + i, start: {dateTime: '2026-10-20T09:00:00Z'},
+    extendedProperties: {private: {sourceHash}},
   }));
-  s.processEventCleanup();
+  s.processEventCleanup([{source: 'source-id'}]);
   assert.deepEqual(removed, ['target-0', 'target-1']);
+});
+
+test('cleanup honors removal settings for each hashed source and preserves unknown legacy events', () => {
+  const removed = [];
+  const s = script({Events: {remove(_calendarId, id) { removed.push(id); return {}; }}});
+  s.targetCalendarId = 'target-id';
+  const sourceA = 'https://example.com/a.ics';
+  const sourceB = 'https://example.com/b.ics';
+  s.calendarEventsIds = ['a-future', 'a-past', 'b-future', 'legacy'];
+  s.calendarEvents = [
+    {id: 'a-future', start: {date: '2099-01-01'}, extendedProperties: {private: {sourceHash: s.sourceAddressHash(sourceA)}}},
+    {id: 'a-past', start: {date: '2020-01-01'}, extendedProperties: {private: {sourceHash: s.sourceAddressHash(sourceA)}}},
+    {id: 'b-future', start: {date: '2099-01-01'}, extendedProperties: {private: {sourceHash: s.sourceAddressHash(sourceB)}}},
+    {id: 'legacy', start: {date: '2099-01-01'}, extendedProperties: {private: {id: 'legacy'}}},
+  ];
+  s.processEventCleanup([
+    {source: sourceA, removeEventsFromCalendar: true, removePastEventsFromCalendar: false},
+    {source: sourceB, removeEventsFromCalendar: false},
+  ]);
+  assert.deepEqual(removed, ['a-future']);
+});
+
+test('cleanup backfills the source hash only for an unambiguous live legacy event', () => {
+  const patches = [];
+  const s = script({Events: {patch(body, _calendarId, id) { patches.push({body, id}); return {id}; }}});
+  s.targetCalendarId = 'target-id';
+  s.calendarEventsIds = ['current', 'missing', 'ambiguous'];
+  s.icsEventsIds = ['current', 'ambiguous'];
+  s.calendarEvents = s.calendarEventsIds.map(id => ({id, extendedProperties: {
+    private: {id, fromGAS: 'true', MD5: 'digest'},
+  }}));
+  s.icsEventSourceHashes = {current: [s.sourceAddressHash('feed.ics')],
+    ambiguous: [s.sourceAddressHash('first.ics'), s.sourceAddressHash('second.ics')]};
+  s.processEventCleanup([{source: 'feed.ics'}]);
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].id, 'current');
+  assert.equal(patches[0].body.extendedProperties.private.id, 'current');
+  assert.equal(patches[0].body.extendedProperties.private.MD5, 'digest');
+  assert.equal(patches[0].body.extendedProperties.private.sourceHash, s.sourceAddressHash('feed.ics'));
+});
+
+test('one ICS feed cannot keep an obsolete event from another feed with the same UID', () => {
+  const removed = [];
+  const s = script({Events: {remove(_calendarId, id) { removed.push(id); return {}; }}});
+  const sourceA = 'https://example.com/a.ics';
+  const sourceB = 'https://example.com/b.ics';
+  s.targetCalendarId = 'target-id';
+  s.calendarEventsIds = ['shared', 'shared'];
+  s.calendarEvents = [
+    {id: 'from-a', start: {date: '2099-01-01'}, extendedProperties: {private: {sourceHash: s.sourceAddressHash(sourceA)}}},
+    {id: 'from-b', start: {date: '2099-01-01'}, extendedProperties: {private: {sourceHash: s.sourceAddressHash(sourceB)}}},
+  ];
+  s.icsEventsIds = ['shared'];
+  s.registerSourceEvent('shared', sourceB);
+  s.processEventCleanup([{source: sourceA}, {source: sourceB}]);
+  assert.deepEqual(removed, ['from-a']);
 });
 
 test('excluding a Google recurrence override suppresses its generated instance', () => {
@@ -373,14 +500,15 @@ test('future-filtered ICS series copies stable individual instances with overrid
 test('ICS override moved into the window from a later original date keeps its original identity', () => {
   const s = script({});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ical.js.gs'), 'utf8'), s, {filename: 'ical.js.gs'});
-  s.recurringInstanceWindowDays = 3;
+  s.recurringInstanceWindowDays = 180;
   s.filters = [{parameter: 'dtstart', type: 'include', comparison: '>', offset: 0}];
   const day = new Date();
   day.setUTCHours(0, 0, 0, 0);
   const stamp = offset => new Date(day.getTime() + offset * 86400000 + 10 * 3600000)
     .toISOString().replace(/[-:]/g, '').replace(/\.000Z$/, 'Z');
   const feed = `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:series\nDTSTART:${stamp(1)}\nDTEND:${stamp(1).replace('T100000Z', 'T110000Z')}\nRRULE:FREQ=DAILY;COUNT=10\nEND:VEVENT\nBEGIN:VEVENT\nUID:series\nRECURRENCE-ID:${stamp(6)}\nDTSTART:${stamp(2)}\nDTEND:${stamp(2).replace('T100000Z', 'T110000Z')}\nSUMMARY:Moved in\nEND:VEVENT\nEND:VCALENDAR`;
-  const events = s.parseResponses([{source: 'feed.ics', content: feed}]);
+  const events = s.parseResponses([{source: 'feed.ics', content: feed,
+    settings: {recurringInstanceWindowDays: 3}}]);
   const moved = events.find(event => event.getFirstPropertyValue('summary') === 'Moved in');
   assert.ok(moved);
   assert.ok(moved.getFirstPropertyValue('uid').endsWith(':' + new Date(day.getTime() + 6 * 86400000 + 10 * 3600000).toISOString().replace('.000Z', 'Z')));

@@ -17,7 +17,15 @@ var sourceCalendars = [
 
 The previous array format remains supported, including mixed configurations: `[source, target]` or `[source, target, colour]`.
 
-Internally, `condenseCalendarMap` groups entries as `{target, sources}`. Each source is an object with named fields, and additional fields from object mappings are retained for future per-source settings. At present, `colour` is the per-source setting applied during sync.
+Internally, `condenseCalendarMap` groups entries as `{target, sources}`. Each source is an object with named fields. Object mappings can override these settings for that source: `defaultColor`, `addAlerts`, `addOrganizerToTitle`, `descriptionAsTitles`, `addCalToTitle`, `addAttendees`, `defaultAllDayReminder`, `overrideVisibility`, `recurringInstanceWindowDays`, `addEventsToCalendar`, `modifyExistingEvents`, `removeEventsFromCalendar`, and `removePastEventsFromCalendar`. Unspecified settings use their global `Config.gs` values; an explicit `false` overrides a global `true`. For example:
+
+```javascript
+{source: "https://example.com/events.ics", target: "Target",
+  addAlerts: "no", addCalToTitle: true,
+  removeEventsFromCalendar: true, removePastEventsFromCalendar: false}
+```
+
+`colour` takes precedence over both the source's `defaultColor` and the global `defaultColor`. Copied events store a hash of the configured source address so cleanup can apply that source's removal settings without storing the address itself. Existing events are tagged when they still match one unambiguous source event. Older events that no longer match a source are preserved because their source cannot be identified safely. Task cleanup remains controlled by the global setting.
 
 ### Updates from this fork
 
