@@ -65,7 +65,7 @@ Source: [#22](https://github.com/derekantrican/GAS-ICS-Sync/issues/22). This dep
 
 
 
-## Fixed and tested
+# Fixed and tested
 
 ### 1. Preserve target events when a source fails or is unexpectedly empty — Fixed and covered
 
