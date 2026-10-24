@@ -1,6 +1,6 @@
-# Improvements to consider from upstream
+# GAS-CalSync: improvements to consider from upstream
 
-Reviewed against `rufuswilson/` on 23 October 2026. It includes `Config.gs`, Google Calendar source support, per-source settings, filters, an auto-updater, and regression tests. The upstream inventory comprises 25 open pull requests and 39 open issues from the earlier upstream review. These are feature bundles, not instructions to merge every PR. All 76 local tests passed; live Google Calendar behavior was not tested.
+Reviewed against GAS-CalSync on 24 October 2026. It includes `Config.gs`, Google Calendar source support, per-source settings, filters, an auto-updater, and regression tests. The upstream inventory comprises 25 open pull requests and 39 open issues from the earlier upstream review. These are feature bundles, not instructions to merge every PR. The current local suite passes 94 tests, and a sync was verified on the test account.
 
 **Status:** The **Fixed and tested** section contains locally implemented items with regression tests. **Partial** means more work or verification is needed; **Design** needs a behavior or migration decision; **Investigate** lacks a confirmed cause. Priorities indicate a suggested order, not upstream severity.
 
@@ -220,4 +220,4 @@ The README now has fork-specific manual installation and `clasp` guidance, a man
 
 Sources: issues [#41](https://github.com/derekantrican/GAS-ICS-Sync/issues/41), [#67](https://github.com/derekantrican/GAS-ICS-Sync/issues/67).
 
-The fork now has 76 passing tests, including focused regressions for these fixes. A maintained-source syntax and whitespace check runs with the suite in GitHub Actions; it replaces the proposed external Hound service.
+The fork now has 87 passing tests, including focused regressions for these fixes. A maintained-source syntax and whitespace check runs with the suite in GitHub Actions; it replaces the proposed external Hound service.

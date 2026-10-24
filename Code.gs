@@ -10,7 +10,7 @@
 * 3) Install:
 *      New Interface: Make sure your toolbar says "install" to the right of "Debug", then click "Run"
 *      Old Interface: Click "Run" > "Run function" > "install"
-* 4) Authorize: You will be prompted to authorize the program and will need to click "Advanced" > "Go to GAS-ICS-Sync (unsafe)"
+* 4) Authorize: You will be prompted to authorize the program and will need to click "Advanced" > "Go to GAS-CalSync (unsafe)"
 *      - For steps to follow in authorization, see this video: https://youtu.be/_5k10maGtek?t=1m22s
 *      - To learn more about the permissions requested by the script visit https://github.com/derekantrican/GAS-ICS-Sync/wiki/Understanding-Permissions-in-GAS%E2%80%90ICS%E2%80%90Sync
 * 5) You can also run "startSync" if you want to sync only once (New Interface: change the dropdown to the right of "Debug" from "install" to "startSync")
@@ -26,7 +26,7 @@
 *           ABOUT THE AUTHOR
 *=========================================
 *
-* This program was created by Derek Antrican
+* GAS-CalSync is based on the original program created by Derek Antrican.
 *
 * If you would like to see other programs Derek has made, you can check out
 * his website: derekantrican.com or his github: https://github.com/derekantrican
@@ -35,7 +35,7 @@
 *            BUGS/FEATURES
 *=========================================
 *
-* Please report any issues at https://github.com/derekantrican/GAS-ICS-Sync/issues
+* Please report GAS-CalSync issues at https://github.com/rufuswilson/GAS-CalSync/issues
 *
 *=========================================
 *           $$ DONATIONS $$
@@ -79,9 +79,9 @@ var titlePrefixAllDayOnly = typeof titlePrefixAllDayOnly === "undefined" ? false
 var mapMicrosoftTentativeToFree = typeof mapMicrosoftTentativeToFree === "undefined" ? false : mapMicrosoftTentativeToFree;
 var fallbackReminderMinutes = typeof fallbackReminderMinutes === "undefined" ? -1 : fallbackReminderMinutes;
 var decodeOutlookSafeLinks = typeof decodeOutlookSafeLinks === "undefined" ? false : decodeOutlookSafeLinks;
-var autoUpdateRepository = typeof autoUpdateRepository === "undefined" ? "rufuswilson/GAS-ICS-Sync" : autoUpdateRepository;
+var autoUpdateRepository = typeof autoUpdateRepository === "undefined" ? "rufuswilson/GAS-CalSync" : autoUpdateRepository;
 var autoUpdateMode = typeof autoUpdateMode === "undefined" ? "auto" : autoUpdateMode;
-var autoUpdateChannel = typeof autoUpdateChannel === "undefined" ? "bleeding-edge" : autoUpdateChannel;
+var autoUpdateChannel = typeof autoUpdateChannel === "undefined" ? "release" : autoUpdateChannel;
 var autoUpdateBranch = typeof autoUpdateBranch === "undefined" ? "stable" : autoUpdateBranch;
 
 /** Check the account without running calendar sync. */
@@ -191,8 +191,8 @@ var calendarEvents = [];
 var calendarEventsIds = [];
 var icsEventsIds = [];
 var icsEventSourceHashes = Object.create(null);
+var legacySeriesSourceHashes = Object.create(null);
 var recurringEvents = [];
-var nativeExceptions = [];
 var targetCalendarId;
 var targetCalendarName;
 
@@ -203,10 +203,106 @@ var removedEvents = [];
 
 // Syncing logic can set this to true to cause the Google Apps Script "Executions" dashboard to report failure
 var reportOverallFailure = false;
+var migrationPreviewMode = false;
+var migrationActions = [];
+
+function recordMigrationAction_(action, event, copy) {
+  migrationActions.push({ action: action, target: targetCalendarName, targetId: targetCalendarId,
+    eventId: event && event.id || "", sourceId: copy && copy.extendedProperties &&
+      copy.extendedProperties.private && copy.extendedProperties.private.id || "",
+    summary: copy && copy.summary || event && event.summary || "",
+    start: copy && copy.start || event && event.start || null,
+    digest: copy && copy.extendedProperties && copy.extendedProperties.private &&
+      copy.extendedProperties.private.MD5 || "" });
+}
+
+function migrationFingerprint_() {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,
+    JSON.stringify(migrationActions), Utilities.Charset.UTF_8);
+  return bytes.map(function (byte) { return (byte & 255).toString(16).padStart(2, "0"); }).join("");
+}
+
+/** Read-only preview of the changes that the v2 sync would make. */
+function PreviewMigration() {
+  return previewMigration_(true);
+}
+
+function previewMigration_(remember) {
+  migrationActions = [];
+  migrationPreviewMode = true;
+  try {
+    startSync();
+    var fingerprint = migrationFingerprint_();
+    if (remember) PropertiesService.getScriptProperties().setProperty("migrationPreview:v2", fingerprint);
+    var result = { fingerprint: fingerprint, count: migrationActions.length,
+      actions: migrationActions.slice() };
+    Logger.log("Migration preview: " + JSON.stringify(result));
+    return result;
+  } finally {
+    migrationPreviewMode = false;
+  }
+}
+
+/** Apply a previously reviewed preview if it still describes the current changes. */
+function ApplyMigration() {
+  var properties = PropertiesService.getScriptProperties();
+  var reviewed = properties.getProperty("migrationPreview:v2");
+  if (!reviewed) throw new Error("Run PreviewMigration and review its execution log first");
+  var fresh = previewMigration_(false);
+  if (fresh.fingerprint !== reviewed)
+    throw new Error("Migration changed since the review. Run PreviewMigration again, review its log, then run ApplyMigration");
+  properties.deleteProperty("migrationPreview:v2");
+  properties.setProperty("migrationApproved:v2", "true");
+  try {
+    startSync();
+  } catch (error) {
+    properties.deleteProperty("migrationApproved:v2");
+    throw error;
+  }
+  Logger.log("Migration applied: " + fresh.count + " proposed changes");
+  return { applied: true, count: fresh.count };
+}
+
+/** Check every existing target before a scheduled sync can write to any of them. */
+function requireMigrationReview_() {
+  var properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty("migrationApproved:v2") === "true") return;
+  var groups = condenseCalendarMap(sourceCalendars);
+  if (groups.length < 2) return; // The normal target read checks a single target before writing.
+  groups.forEach(function (group) {
+    var target;
+    try {
+      target = setupTargetCalendar(group.target, group.targetId, false);
+    } catch (error) {
+      if (group.createTargetCalendarIfMissing === true &&
+        /^Error: Target calendar not found: /.test(String(error))) return;
+      throw error;
+    }
+    var pageToken;
+    var seen = Object.create(null);
+    do {
+      var options = { showDeleted: false, privateExtendedProperty: "fromGAS=true", maxResults: 250 };
+      if (pageToken) options.pageToken = pageToken;
+      var page = callWithBackoff(function () { return Calendar.Events.list(target.id, options); }, defaultMaxRetries);
+      if (!page) throw new Error("Could not check target events before migration: " + group.target);
+      if ((page.items || []).some(function (event) {
+        var privateFields = event.extendedProperties && event.extendedProperties.private;
+        return event.status !== "cancelled" && privateFields &&
+          privateFields.fromGAS === "true" && privateFields.syncVersion !== "2";
+      })) throw new Error("Legacy copied events found in " + group.target +
+        ". Run PreviewMigration, review the log, then run ApplyMigration");
+      pageToken = page.nextPageToken;
+      if (pageToken && seen[pageToken]) throw new Error("Repeated target-event page token for " + group.target);
+      if (pageToken) seen[pageToken] = true;
+    } while (pageToken);
+  });
+  properties.setProperty("migrationApproved:v2", "true");
+}
 
 function startSync() {
   var syncLock = LockService.getScriptLock();
   if (!syncLock.tryLock(1000)) {
+    if (migrationPreviewMode) throw new Error("Could not preview migration while another sync is running");
     Logger.log("Another iteration is currently running! Exiting...");
     return;
   }
@@ -215,6 +311,12 @@ function startSync() {
   if (runUserEmail) Logger.log("Run by user: " + runUserEmail);
 
   try {
+    reportOverallFailure = false;
+    addedEvents = [];
+    modifiedEvents = [];
+    removedEvents = [];
+    if (migrationPreviewMode) migrationActions = [];
+    else if (typeof PropertiesService !== "undefined") requireMigrationReview_();
 
     //Disable email notification if no mail adress is provided
     emailSummary = emailSummary && email != "";
@@ -226,8 +328,8 @@ function startSync() {
       calendarEventsIds = [];
       icsEventsIds = [];
       icsEventSourceHashes = Object.create(null);
+      legacySeriesSourceHashes = Object.create(null);
       recurringEvents = [];
-      nativeExceptions = [];
 
       targetCalendarName = calendar.target;
       var sourceCalendarURLs = calendar.sources;
@@ -246,10 +348,12 @@ function startSync() {
       Logger.log("Syncing " + responses.length + " calendars to " + targetCalendarName);
       // A failed source must never make its existing target events look obsolete.
       var sourceFetchFailed = responses.failed === true;
+      if (migrationPreviewMode && sourceFetchFailed)
+        throw new Error("Could not preview migration because a source could not be read");
 
       //------------------------ Get target calendar information------------------------
       var targetCalendar = setupTargetCalendar(targetCalendarName, calendar.targetId,
-        calendar.createTargetCalendarIfMissing);
+        !migrationPreviewMode && calendar.createTargetCalendarIfMissing);
       targetCalendarId = targetCalendar.id;
       Logger.log("Working on calendar: " + targetCalendarId);
 
@@ -280,6 +384,13 @@ function startSync() {
           Logger.log("Listed " + calendarEvents.length + " active target events so far");
         }
         Logger.log("Fetched " + calendarEvents.length + " existing events from " + targetCalendarName);
+        if (!migrationPreviewMode && typeof PropertiesService !== "undefined" &&
+          PropertiesService.getScriptProperties().getProperty("migrationApproved:v2") !== "true" &&
+          calendarEvents.some(function (event) {
+            var props = event.extendedProperties && event.extendedProperties.private;
+            return props && props.fromGAS === "true" && props.syncVersion !== "2";
+          }))
+          throw new Error("Legacy copied events found. Run PreviewMigration, review the log, then run ApplyMigration");
         for (var i = 0; i < calendarEvents.length; i++) {
           if (calendarEvents[i].extendedProperties != null) {
             var privateProperties = calendarEvents[i].extendedProperties.private || {};
@@ -291,6 +402,8 @@ function startSync() {
         Logger.log("Parsing source events");
         vevents = parseResponses(responses);
         sourceFetchFailed = responses.failed === true;
+        if (migrationPreviewMode && sourceFetchFailed)
+          throw new Error("Could not preview migration because a source could not be parsed");
         Logger.log("Parsed " + vevents.length + " events from sources");
       }
 
@@ -303,8 +416,7 @@ function startSync() {
           }, defaultMaxRetries);
 
         vevents.forEach(function (e, index) {
-          if (e.nativeEvent) processNativeEvent(e);
-          else processICSEvent(e, calendarTz);
+          processSourceEvent(e, calendarTz);
           if ((index + 1) % 100 === 0) Logger.log("Processed " + (index + 1) + " of " + vevents.length + " source events");
         });
 
@@ -312,28 +424,30 @@ function startSync() {
       }
 
       //------------------------ Remove old events from calendar ------------------------
-      if (canRemove && !sourceFetchFailed && !reportOverallFailure) {
+      if (canRemove && !sourceFetchFailed && !responses.tasksOnly && !reportOverallFailure) {
         Logger.log("Checking " + calendarEvents.length + " events for removal");
         processEventCleanup(sourceCalendarURLs);
         Logger.log("Done checking events for removal");
       }
-      else if (sourceFetchFailed || reportOverallFailure)
-        Logger.log("Skipping cleanup because a source could not be read or an event could not be saved");
+      else if (sourceFetchFailed || responses.tasksOnly || reportOverallFailure)
+        Logger.log("Skipping cleanup because a source had no active events, could not be read, or an event could not be saved");
 
       //------------------------ Process Tasks ------------------------
-      if (addTasks && !sourceFetchFailed && responses.some(function (source) { return source.kind === "ics"; })) {
-        processICSTasks(responses.filter(function (source) { return source.kind === "ics"; }));
+      if (!migrationPreviewMode && addTasks && !sourceFetchFailed) {
+        try {
+          processSourceTasks(responses);
+        } catch (taskError) {
+          Logger.log("Could not sync tasks: " + taskError);
+          reportOverallFailure = true;
+        }
       }
 
       //------------------------ Add Recurring Event Instances ------------------------
       Logger.log("Processing " + recurringEvents.length + " Recurrence Instances!");
-      for (var recEvent of recurringEvents) {
-        processICSEventInstance(recEvent.event, recEvent.settings);
-      }
-      processNativeExceptions();
+      recurringEvents.forEach(syncSourceException);
     }
 
-    if ((addedEvents.length + modifiedEvents.length + removedEvents.length) > 0 && emailSummary) {
+    if (!migrationPreviewMode && (addedEvents.length + modifiedEvents.length + removedEvents.length) > 0 && emailSummary) {
       sendSummary();
     }
     Logger.log("Sync finished!");

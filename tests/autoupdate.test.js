@@ -7,9 +7,9 @@ const vm = require('node:vm');
 const code = fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8');
 const helpers = fs.readFileSync(path.join(__dirname, '..', 'Helpers.gs'), 'utf8');
 const config = fs.readFileSync(path.join(__dirname, '..', 'Config.gs'), 'utf8');
-const repoApi = 'https://api.github.com/repos/rufuswilson/GAS-ICS-Sync';
+const repoApi = 'https://api.github.com/repos/rufuswilson/GAS-CalSync';
 const projectApi = 'https://script.googleapis.com/v1/projects/project-id/content';
-const latest = {tag_name: 'v2.0', html_url: 'https://github.com/rufuswilson/GAS-ICS-Sync/releases/tag/v2.0'};
+const latest = {tag_name: 'v2.0', html_url: 'https://github.com/rufuswilson/GAS-CalSync/releases/tag/v2.0'};
 const sources = {
   'Code.gs': 'function startSync() {}\nfunction AutoUpdate(dryRun) { return AutoUpdateImpl_(dryRun); }',
   'Helpers.gs': 'function AutoUpdateImpl_() {}',
@@ -20,11 +20,11 @@ const sources = {
   'Filters.gs': 'var filters = [];',
 };
 
-test('repository defaults follow the stable branch while no release is published', () => {
+test('repository defaults follow the release channel', () => {
   const context = vm.createContext({});
   vm.runInContext(config, context);
-  assert.equal(context.autoUpdateRepository, 'rufuswilson/GAS-ICS-Sync');
-  assert.equal(context.autoUpdateChannel, 'bleeding-edge');
+  assert.equal(context.autoUpdateRepository, 'rufuswilson/GAS-CalSync');
+  assert.equal(context.autoUpdateChannel, 'release');
   assert.equal(context.autoUpdateBranch, 'stable');
 });
 
@@ -72,11 +72,11 @@ function setup(options = {}) {
         return response(200, {commit: {sha: 'a'.repeat(40)}});
       if (url.startsWith(repoApi + '/contents?ref='))
         return response(200, Object.keys(remoteSources).map(name => ({name, type: 'file'})));
-      const contents = url.match(/^https:\/\/api\.github\.com\/repos\/rufuswilson\/GAS-ICS-Sync\/contents\/([^?]+)\?ref=([^&]+)$/);
+      const contents = url.match(/^https:\/\/api\.github\.com\/repos\/rufuswilson\/GAS-CalSync\/contents\/([^?]+)\?ref=([^&]+)$/);
       if (contents && remoteSources[decodeURIComponent(contents[1])] !== undefined)
         return response(200, {type: 'file', encoding: 'base64',
           content: Buffer.from(remoteSources[decodeURIComponent(contents[1])], 'utf8').toString('base64')});
-      const raw = url.match(/^https:\/\/raw\.githubusercontent\.com\/rufuswilson\/GAS-ICS-Sync\/([^/]+)\/([^/]+)$/);
+      const raw = url.match(/^https:\/\/raw\.githubusercontent\.com\/rufuswilson\/GAS-CalSync\/([^/]+)\/([^/]+)$/);
       if (raw && remoteSources[decodeURIComponent(raw[2])] !== undefined)
         return {getResponseCode() { return 200; }, getContentText() {
           return remoteSources[decodeURIComponent(raw[2])]; }};
@@ -86,7 +86,7 @@ function setup(options = {}) {
   vm.runInContext(code, context);
   vm.runInContext(helpers, context);
   Object.assign(context, {
-    autoUpdateRepository: 'rufuswilson/GAS-ICS-Sync',
+    autoUpdateRepository: 'rufuswilson/GAS-CalSync',
     autoUpdateMode: options.mode || 'auto',
     autoUpdateChannel: options.channel || 'release',
     autoUpdateBranch: 'master',

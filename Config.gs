@@ -5,10 +5,10 @@
 var sourceCalendars = [                 // One entry per source. source can be an ICS URL or a Google Calendar ID/name.
                                         // target is the target calendar name; targetId selects an exact writable calendar ID.
                                         // Set createTargetCalendarIfMissing: true only when intentionally creating a new target.
-                                        // colour is optional; see
+                                        // colour is optional (US alias: color); see
                                         // https://developers.google.com/apps-script/reference/calendar/event-color
-                                        // Event settings can be overridden on a source entry: defaultColor,
-                                        // addAlerts, addOrganizerToTitle, descriptionAsTitles, addCalToTitle,
+                                        // Event settings can be overridden on a source entry: defaultColour,
+                                        // addAlerts, addOrganiserToTitle, descriptionAsTitles, addCalToTitle,
                                         // addAttendees, defaultAllDayReminder, overrideVisibility,
                                         // recurringInstanceWindowDays, addEventsToCalendar,
                                         // modifyExistingEvents, removeEventsFromCalendar,
@@ -17,6 +17,13 @@ var sourceCalendars = [                 // One entry per source. source can be a
                                         // Other optional source settings: titlePrefix, titlePrefixAllDayOnly,
                                         // mapMicrosoftTentativeToFree, fallbackReminderMinutes,
                                         // decodeOutlookSafeLinks.
+                                        // US aliases defaultColor and addOrganizerToTitle remain supported;
+                                        // when both spellings are set, the UK spelling wins.
+                                        // Tasks: set addTasks globally, then optionally use targetTaskList
+                                        // (name or ID) for ICS VTODOs. For a Google Calendar source,
+                                        // sourceTaskList selects a Google Tasks list (name or ID) and
+                                        // targetTaskList must name a different list. Set
+                                        // createTargetTaskListIfMissing: true to create that target.
                                         // Legacy [source, target, colour] entries are also supported.
   { source: "icsUrl1", target: "targetCalendar1" },
   { source: "icsUrl2", target: "targetCalendar2", colour: "11" },
@@ -31,9 +38,9 @@ var removePastEventsFromCalendar = true;  // If you turn this to "false", any ev
 var skipIfEmptyFeed = true;                // Preserve target events when a fetched source has no active events; set false for intentional clearing.
 var pastEventWindowDays = null;            // null syncs all past events; otherwise sync only events ending within this many days.
 var maxCleanupDeletesPerRun = 100;        // Maximum target-event deletion attempts per sync; later runs resume the remainder.
-var recurringInstanceWindowDays = 180;    // Future date filters copy recurring ICS and Google occurrences this many days ahead as individual events.
+var recurringInstanceWindowDays = 180;    // Date filters copy ICS and Google occurrences as individual events ahead of or behind the cutoff.
 var addAlerts = "yes";                    // Whether to copy source alerts or use the target calendar's default reminders ("yes", "no", "default").
-var addOrganizerToTitle = false;          // Whether to prefix the event name with the event organiser for further clarity
+var addOrganiserToTitle = false;          // Whether to prefix the event name with the event organiser for further clarity
 var descriptionAsTitles = false;          // Whether to use the ics/ical descriptions as titles (true) or to use the normal titles as titles (false)
 var addCalToTitle = false;                // Whether to add the source calendar to title
 var addAttendees = false;                 // Whether to add the attendee list. If true, duplicate events will be automatically added to the attendees' calendar.
@@ -44,7 +51,7 @@ var mapMicrosoftTentativeToFree = false;  // Treat Microsoft's tentative busy st
 var fallbackReminderMinutes = -1;        // Optional popup reminder when a source event has no usable explicit reminder.
 var decodeOutlookSafeLinks = false;       // Decode recognized Outlook Safe Links in descriptions.
 var overrideVisibility = "";              // Changes the visibility of the event ("default", "public", "private", "confidential"). Anything else will revert to the class value of the ICAL event.
-var defaultColor = true;                 // true keeps source/calendar colours; otherwise use a CalendarApp.EventColor value when a source has no colour.
+var defaultColour = true;                // true keeps source/calendar colours; otherwise use a CalendarApp.EventColor value when a source has no colour.
 var addTasks = false;
 
 var emailSummary = false;                 // Will email you when an event is added/modified/removed to your calendar
@@ -56,7 +63,7 @@ var defaultMaxRetries = 10; // Maximum retries for Calendar API calls.
 
 // Updates from your fork. "auto" installs changes; "email" only sends a notice.
 // "release" follows the latest published release; "bleeding-edge" follows the branch below.
-var autoUpdateRepository = "rufuswilson/GAS-ICS-Sync";
+var autoUpdateRepository = "rufuswilson/GAS-CalSync";
 var autoUpdateMode = "auto";               // "auto" or "email"
-var autoUpdateChannel = "bleeding-edge";   // "release" or "bleeding-edge"; this fork has no published release yet.
+var autoUpdateChannel = "release";         // "release" or "bleeding-edge"
 var autoUpdateBranch = "stable";           // Used only for "bleeding-edge"
